@@ -6,6 +6,7 @@ import {
   escapeHtml as h, randomCode, cleanBells, timeToSec, pad
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById } from './templates.js';
+import { KR_HOLIDAYS } from './holidays.js';
 import { BUILTIN_SOUNDS, isBuiltin, builtinName, playBell, stopAll, unlockAudio, fileDuration } from './sounds.js';
 
 const root = document.getElementById('root');
@@ -19,6 +20,7 @@ const S = {
   spaces: [], spaceId: null, space: null,
   timetables: [], rules: [], sounds: [], devices: [],
   tab: 'today', cal: null, unsub: [],
+  invites: [],        // 나를 관리자로 초대한 공간
   sheet: null,        // { type, ...데이터 }
   pair: null,         // { code, expiresAt }
   shareParam: new URLSearchParams(location.search).get('share')
@@ -149,6 +151,54 @@ async function loadSpaces() {
   const snap = await F.getDocs(q);
   S.spaces = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   S.spaces.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+  await loadInvites();
+}
+const myEmail = () => String((S.user && S.user.email) || '').toLowerCase();
+const myName = () => String((S.user && (S.user.displayName || S.user.email)) || '').slice(0, 40);
+async function loadInvites() {
+  S.invites = [];
+  if (!myEmail()) return;
+  try {
+    const snap = await F.getDocs(F.query(F.collection(F.db, 'spaces'), F.where('inviteEmails', 'array-contains', myEmail())));
+    S.invites = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => !(s.adminUids || []).includes(S.user.uid));
+  } catch (e) { console.warn(e); }
+}
+function invitesHtml() {
+  if (!S.invites.length) return '';
+  return `<div class="card stack" style="text-align:left">
+    <div class="small bold brass">관리자 초대가 왔어요</div>
+    ${S.invites.map(s => `<div class="row"><div class="grow"><div class="bold">${h(s.name)}</div>
+      <div class="small muted">${h((SPACE_TYPES.find(t => t.id === s.type) || {}).label || '')}</div></div>
+      <button class="btn" data-act="invite-decline" data-id="${h(s.id)}">거절</button>
+      <button class="btn primary" data-act="invite-accept" data-id="${h(s.id)}">수락</button></div>`).join('')}
+  </div>`;
+}
+async function acceptInvite(id) {
+  await F.updateDoc(F.doc(F.db, 'spaces', id), {
+    adminUids: F.arrayUnion(S.user.uid),
+    inviteEmails: F.arrayRemove(myEmail()),
+    [`admins.${S.user.uid}`]: { email: myEmail(), name: myName() }
+  });
+  await loadSpaces();
+  closeSheet();
+  S.tab = 'today';
+  openSpace(id);
+  toast('관리자로 함께하게 됐어요');
+}
+async function declineInvite(id) {
+  await F.updateDoc(F.doc(F.db, 'spaces', id), { inviteEmails: F.arrayRemove(myEmail()) });
+  await loadInvites();
+  if (S.spaceId) { renderSheet(); render(); } else if (!S.spaces.length) renderOnboarding(true);
+}
+// 예전에 만든 공간이라 관리자 정보(이름·이메일)가 없으면 내 정보를 채워 둠
+function ensureMyAdminInfo() {
+  const sp = S.space;
+  if (!sp || !(sp.adminUids || []).includes(S.user.uid)) return;
+  const me = (sp.admins || {})[S.user.uid];
+  if (me && me.email === myEmail()) return;
+  if (S._healed === sp.id) return;
+  S._healed = sp.id;
+  F.updateDoc(spaceRef(), { [`admins.${S.user.uid}`]: { email: myEmail(), name: myName() } }).catch(e => console.warn(e));
 }
 
 function stopSubs() { S.unsub.forEach(u => { try { u(); } catch (e) { /* 무시 */ } }); S.unsub = []; }
@@ -161,7 +211,7 @@ function openSpace(id) {
   S.timetables = []; S.rules = []; S.sounds = []; S.devices = [];
   S.ready = false;
   const onErr = e => { console.error(e); toast('데이터를 불러오지 못했어요'); };
-  S.unsub.push(F.onSnapshot(spaceRef(), d => { if (d.exists()) { S.space = { id: d.id, ...d.data() }; render(); } }, onErr));
+  S.unsub.push(F.onSnapshot(spaceRef(), d => { if (d.exists()) { S.space = { id: d.id, ...d.data() }; ensureMyAdminInfo(); render(); if (S.sheet && S.sheet.type === 'admins') renderSheet(); } }, onErr));
   S.unsub.push(F.onSnapshot(sub('timetables'), q => { S.timetables = q.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => millis(a.createdAt) - millis(b.createdAt)); S.ready = true; render(); }, onErr));
   S.unsub.push(F.onSnapshot(sub('rules'), q => { S.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, onErr));
   S.unsub.push(F.onSnapshot(sub('sounds'), q => { S.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => millis(a.createdAt) - millis(b.createdAt)); render(); }, onErr));
@@ -174,7 +224,7 @@ function openSpace(id) {
 let onboard = { name: '', type: 'school', level: 'elem' };
 function renderOnboarding(firstTime = true) {
   const html = `<div class="${firstTime ? 'hero' : 'stack loose'}" style="${firstTime ? '' : 'text-align:left'}">
-    ${firstTime ? `<div class="logo">${I.logo}</div><div class="stack tight"><h1 style="font-size:28px">공간 만들기</h1><p class="sub">종을 울릴 학교·학원·회사를 만들어요</p></div>` : ''}
+    ${firstTime ? `<div class="logo">${I.logo}</div><div class="stack tight"><h1 style="font-size:28px">공간 만들기</h1><p class="sub">종을 울릴 학교·학원·회사를 만들어요</p></div>${invitesHtml()}` : ''}
     <div class="card stack loose" style="${firstTime ? '' : 'border:0;padding:0;background:none'}">
       <label class="field"><span>이름</span><input class="input" id="ob-name" maxlength="40" placeholder="예: 다니엘 아마츠" value="${h(onboard.name)}"></label>
       <div class="field"><span>종류</span><div class="type-grid">
@@ -203,7 +253,8 @@ async function createSpace() {
     const ref = F.doc(F.collection(F.db, 'spaces'));
     await F.setDoc(ref, {
       name, type: onboard.type, timezone: 'Asia/Seoul', ownerUid: S.user.uid, adminUids: [S.user.uid],
-      plan: 'free', createdAt: F.serverTimestamp()
+      plan: 'free', createdAt: F.serverTimestamp(),
+      admins: { [S.user.uid]: { email: myEmail(), name: myName() } }, inviteEmails: []
     });
     const st = starterFor(onboard.type, onboard.level);
     const batch = F.writeBatch(F.db);
@@ -351,7 +402,9 @@ function viewCalendar() {
       <div class="grow"><div class="tiny bold brass">${RULE_KINDS[r.kind].label}</div>
         <div style="font-weight:500">${h(ruleLabel(r))}</div>
         <div class="small muted ellipsis">${h(ruleSummary(r))}</div></div></button>`).join('') || '<div class="card muted center">규칙이 없어요. 규칙이 있어야 종이 울려요.</div>'}
-    <button class="btn dashed" data-act="rule-new">+ 규칙 추가</button>
+    <div class="row" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      <button class="btn dashed" data-act="rule-new">+ 규칙 추가</button>
+      <button class="btn dashed" data-act="holidays">공휴일 넣기</button></div>
   </div>`;
 }
 function ruleSummary(r) {
@@ -485,7 +538,7 @@ function renderSheet() {
   if (!sh) { sheetRoot.innerHTML = ''; document.body.style.overflow = ''; return; }
   document.body.style.overflow = 'hidden';
   const fn = {
-    'space-menu': sheetSpaceMenu, 'space-new': () => sheetFrame('새 공간', renderOnboarding(false)), 'space-edit': sheetSpaceEdit,
+    'space-menu': sheetSpaceMenu, 'space-new': () => sheetFrame('새 공간', renderOnboarding(false)), 'space-edit': sheetSpaceEdit, 'admins': sheetAdmins, 'holidays': sheetHolidays,
     'ring': sheetRing, 'date': sheetDate, 'rule': sheetRule,
     'tt-new': sheetTtNew, 'tt-templates': sheetTemplates, 'tt-edit': sheetTtEdit,
     'share': sheetShare, 'import': sheetImport, 'library': sheetLibrary,
@@ -502,9 +555,51 @@ function sheetSpaceMenu() {
       <div class="grow"><div class="bold">${h(s.name)}</div><div class="small muted">${h((SPACE_TYPES.find(t => t.id === s.type) || {}).label || '')}</div></div>
       ${s.id === S.spaceId ? '<span class="badge dark">지금</span>' : ''}</button>`).join('')}
       <button class="btn dashed" data-act="space-new">+ 새 공간 만들기</button></div>
+    ${invitesHtml()}
+    <button class="btn block" data-act="admins">관리자 초대·관리</button>
     <button class="btn block" data-act="space-edit">이 공간 이름·종류 바꾸기</button>
     <div class="card small"><div class="muted">로그인: ${h(S.user.email || '')}</div><div class="muted">벨키퍼 ${APP_VERSION} · 무료 요금제</div></div>
     <button class="btn block danger" data-act="logout">로그아웃</button>`);
+}
+function sheetAdmins() {
+  const sp = S.space || {};
+  const info = sp.admins || {};
+  const owner = sp.ownerUid;
+  const iAmOwner = owner === S.user.uid;
+  const invites = sp.inviteEmails || [];
+  const link = new URL('index.html', location.href).href.replace(/\?.*$/, '');
+  return sheetFrame('관리자', `
+    <div class="list">${(sp.adminUids || []).map(uid => {
+      const a = info[uid] || {};
+      const me = uid === S.user.uid;
+      return `<div class="item"><div class="grow"><div class="bold ellipsis">${h(a.name || (me ? myName() : '관리자'))}${me ? ' (나)' : ''}</div>
+        <div class="small muted ellipsis">${h(a.email || (me ? myEmail() : ''))}</div></div>
+        ${uid === owner ? '<span class="badge dark">소유자</span>' : ''}
+        ${uid !== owner && (iAmOwner || me) ? `<button class="btn danger" data-act="admin-remove" data-id="${h(uid)}">${me ? '나가기' : '내보내기'}</button>` : ''}</div>`;
+    }).join('')}</div>
+    ${invites.length ? `<div class="stack tight"><div class="small bold">수락을 기다리는 초대</div>
+      <div class="list">${invites.map(em => `<div class="item"><div class="grow ellipsis">${h(em)}</div>
+        <button class="btn" data-act="invite-cancel" data-id="${h(em)}">취소</button></div>`).join('')}</div></div>` : ''}
+    <label class="field"><span>초대할 구글 계정 이메일</span><input class="input" type="email" id="inv-email" autocomplete="off" placeholder="예: teacher@gmail.com"></label>
+    <button class="btn primary lg block" data-act="invite-send">초대하기</button>
+    <div class="small muted">초대받은 분이 <b>${h(link)}</b> 에 그 구글 계정으로 로그인하면 초대 수락 버튼이 보여요. 관리자는 일과표·달력·소리·기기를 모두 바꿀 수 있어요.</div>
+    <button class="btn block" data-act="copy" data-text="${h(`[벨키퍼] '${sp.name || ''}' 관리자로 초대했어요. ${link} 에서 초대받은 구글 계정으로 로그인하면 수락할 수 있어요.`)}">초대 안내 문구 복사</button>`, { back: 'space-menu' });
+}
+function sheetHolidays(sh) {
+  const tk = todayKey(Date.now(), tz());
+  const days = new Set(S.rules.filter(r => r.kind === 'day').map(r => r.date));
+  const list = KR_HOLIDAYS.filter(x => x.date >= tk);
+  const last = KR_HOLIDAYS[KR_HOLIDAYS.length - 1].date.slice(0, 4);
+  return sheetFrame('공휴일 넣기', `
+    <div class="small muted">고른 날에 "종 없음" 예외를 한 번에 만들어요. 이미 예외가 있는 날은 건너뛰어요. (${last}년까지)</div>
+    <div class="row"><button class="btn soft" data-act="hol-all" data-v="1">모두 고르기</button><button class="btn soft" data-act="hol-all" data-v="0">모두 풀기</button></div>
+    <div class="list">${list.map(x => {
+      const has = days.has(x.date);
+      return `<label class="item check" style="align-items:center"><input type="checkbox" data-hol="${x.date}" data-name="${h(x.name)}" ${has ? 'disabled' : (sh.pick && sh.pick[x.date] === false ? '' : 'checked')}>
+        <span class="grow"><span class="bold num">${h(koreanDate(x.date))}</span> <span class="muted">${x.date.slice(0, 4)}</span><br><span class="small">${h(x.name)}</span></span>
+        ${has ? '<span class="badge">이미 있음</span>' : ''}</label>`;
+    }).join('') || '<div class="card muted center">넣을 공휴일이 없어요</div>'}</div>
+    <button class="btn primary lg block" data-act="hol-save">고른 날 종 없음으로 저장</button>`);
 }
 function sheetSpaceEdit() {
   const sp = S.space || {};
@@ -848,6 +943,14 @@ async function saveDayException(key, ttId, name) {
 
 async function sendCommand(payload) {
   await F.addDoc(sub('commands'), { ...payload, createdAt: F.serverTimestamp(), by: S.user.uid });
+  cleanupCommands();
+}
+// 하루 지난 원격 명령은 정리 (쌓이지 않게)
+async function cleanupCommands() {
+  try {
+    const old = await F.getDocs(F.query(sub('commands'), F.where('createdAt', '<', F.Timestamp.fromMillis(Date.now() - 86400000)), F.limit(30)));
+    await Promise.all(old.docs.map(d => F.deleteDoc(d.ref)));
+  } catch (e) { console.warn(e); }
 }
 
 async function uploadSound() {
@@ -903,6 +1006,38 @@ document.addEventListener('click', async e => {
       case 'space-open': closeSheet(); S.tab = 'today'; return openSpace(id);
       case 'space-new': onboard = { name: '', type: 'school', level: 'elem' }; return openSheet({ type: 'space-new' });
       case 'space-edit': return openSheet({ type: 'space-edit' });
+      case 'admins': return openSheet({ type: 'admins' });
+      case 'invite-send': {
+        const em = String(document.getElementById('inv-email').value || '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return toast('이메일을 확인해주세요');
+        const info = Object.values((S.space && S.space.admins) || {});
+        if (info.some(a => a.email === em)) return toast('이미 관리자예요');
+        if (((S.space && S.space.inviteEmails) || []).length >= 20) return toast('초대는 20명까지 걸어 둘 수 있어요');
+        await F.updateDoc(spaceRef(), { inviteEmails: F.arrayUnion(em) });
+        return toast('초대했어요. 안내 문구를 복사해서 보내 주세요');
+      }
+      case 'invite-cancel': await F.updateDoc(spaceRef(), { inviteEmails: F.arrayRemove(id) }); return toast('초대를 취소했어요');
+      case 'invite-accept': return acceptInvite(id);
+      case 'invite-decline': return declineInvite(id);
+      case 'admin-remove': {
+        const me = id === S.user.uid;
+        if (!confirm(me ? '이 공간의 관리자에서 나갈까요?' : '이 관리자를 내보낼까요?')) return;
+        await F.updateDoc(spaceRef(), { adminUids: F.arrayRemove(id), [`admins.${id}`]: F.deleteField() });
+        if (me) { closeSheet(); await loadSpaces(); if (S.spaces.length) openSpace(S.spaces[0].id); else { stopSubs(); S.spaceId = null; renderOnboarding(true); } return toast('나왔어요'); }
+        return toast('내보냈어요');
+      }
+      case 'holidays': return openSheet({ type: 'holidays', pick: {} });
+      case 'hol-all': {
+        sheetRoot.querySelectorAll('[data-hol]').forEach(c => { if (!c.disabled) c.checked = el.dataset.v === '1'; });
+        return;
+      }
+      case 'hol-save': {
+        const picked = [...sheetRoot.querySelectorAll('[data-hol]')].filter(c => c.checked && !c.disabled);
+        if (!picked.length) return toast('고른 날이 없어요');
+        el.disabled = true; el.textContent = '저장하는 중…';
+        await Promise.all(picked.map(c => F.addDoc(sub('rules'), { kind: 'day', date: c.dataset.hol, ttId: '', name: c.dataset.name.slice(0, 30), by: S.user.uid, createdAt: F.serverTimestamp() })));
+        closeIf(sh); return toast(`공휴일 ${picked.length}일을 넣었어요`);
+      }
       case 'space-save': {
         const name = document.getElementById('se-name').value.trim();
         if (!name) return toast('이름을 넣어주세요');
@@ -1097,6 +1232,15 @@ setInterval(() => {
 }, 1000);
 // 기기 상태·지난 종 표시를 30초마다 새로
 setInterval(() => { if (!S.sheet && (S.tab === 'today' || S.tab === 'devices')) render(); }, 30000);
+
+// 공간이 아직 없을 때, 창으로 돌아오면 새 초대가 왔는지 다시 확인
+window.addEventListener('focus', async () => {
+  if (S.user && !S.spaceId && document.getElementById('ob-name')) {
+    const before = S.invites.length;
+    await loadInvites();
+    if (S.invites.length !== before) { onboard.name = document.getElementById('ob-name').value; renderOnboarding(true); }
+  }
+});
 
 // ── 시작 ─────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

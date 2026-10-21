@@ -8,7 +8,8 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch
+  onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
+  arrayUnion, arrayRemove, deleteField
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
   getStorage, ref as sRef, uploadBytesResumable, getDownloadURL, deleteObject
@@ -34,6 +35,7 @@ export {
   onAuthStateChanged, signOut,
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
+  arrayUnion, arrayRemove, deleteField,
   sRef, uploadBytesResumable, getDownloadURL, deleteObject
 };
 

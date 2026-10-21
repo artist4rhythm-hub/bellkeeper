@@ -160,8 +160,11 @@ function startRunning() {
   P.unsub.push(F.onSnapshot(sub('sounds'), q => { P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(F.query(sub('commands'), F.orderBy('createdAt', 'desc'), F.limit(10)), q => {
     if (P.seenCmd === null) P.seenCmd = new Set();
-    for (const ch of q.docChanges()) {
-      if (ch.type !== 'added' || P.seenCmd.has(ch.doc.id)) continue;
+    // 오래된 것부터 순서대로 (최신 명령이 마지막에 남도록)
+    const tsOf = d => { const c = d.data().createdAt; return c && c.toMillis ? c.toMillis() : now(); };
+    const changes = q.docChanges().filter(ch => ch.type === 'added').sort((a, b) => tsOf(a.doc) - tsOf(b.doc));
+    for (const ch of changes) {
+      if (P.seenCmd.has(ch.doc.id)) continue;
       P.seenCmd.add(ch.doc.id);
       const c = ch.doc.data();
       const at = c.createdAt && c.createdAt.toMillis ? c.createdAt.toMillis() : now();

@@ -1,8 +1,8 @@
 // 벨키퍼 서비스 워커 — 인터넷이 끊겨도 화면과 기본 종소리가 뜨도록 앱 파일을 저장해 둡니다.
-const CACHE = 'bellkeeper-v1.0.0';
+const CACHE = 'bellkeeper-v1.1.0';
 const SHELL = [
   './', './index.html', './play.html', './css/style.css',
-  './js/admin.js', './js/player.js', './js/core.js', './js/sounds.js', './js/templates.js',
+  './js/admin.js', './js/player.js', './js/core.js', './js/sounds.js', './js/templates.js', './js/holidays.js',
   './js/fb.js', './js/firebase-config.js',
   './manifest.json', './manifest-play.json',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
