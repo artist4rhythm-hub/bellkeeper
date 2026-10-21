@@ -251,3 +251,49 @@ body.player { overflow: hidden; }
   .pl-ring { width: min(70vw, 42vh); height: min(70vw, 42vh); margin: 0 auto; }
 }
 @media (prefers-reduced-motion: reduce) { .ring-pulse { animation: none; } }
+
+/* 계정 버튼 */
+.avatar-btn, .avatar {
+  width: 44px; height: 44px; border-radius: 22px; background: var(--ink); color: var(--gold);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 900; font-size: 17px;
+  border: 0; flex-shrink: 0; padding: 0;
+}
+.avatar { width: 48px; height: 48px; border-radius: 24px; }
+
+/* ── 홈 화면 ───────────────────────────────── */
+.home { max-width: 1080px; margin: 0 auto; padding: 0 20px 60px; }
+.home-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; gap: 12px; }
+.home-brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 20px; letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
+.home-brand svg { width: 36px; height: 36px; }
+.home-hero { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; align-items: center; padding: 40px 0 56px; }
+.home-hero h1 { font-size: clamp(36px, 6vw, 60px); font-weight: 900; letter-spacing: -0.035em; line-height: 1.08; margin: 0 0 16px; }
+.home-hero h1 em { font-style: normal; color: var(--brass-text); }
+.home-hero p.lead { font-size: 18px; color: var(--ink-2); margin: 0 0 26px; line-height: 1.65; }
+.home-cta { display: flex; flex-wrap: wrap; gap: 10px; }
+.home-cta .btn { min-height: 54px; padding: 0 22px; font-size: 16px; border-radius: 14px; }
+.home-panel { background: var(--ink); color: var(--ground); border-radius: 28px; padding: 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 50px rgba(23, 35, 31, 0.18); }
+.home-panel .big { font-size: 64px; font-weight: 900; letter-spacing: -0.03em; line-height: 1; }
+.home-panel .muted { color: #C9D1CC; }
+.home-panel .row-b { display: flex; gap: 14px; padding: 10px 0; border-top: 1px solid #2B3A34; font-size: 15px; }
+.home-panel .row-b b { color: var(--gold); width: 52px; }
+.home-section { padding: 40px 0; }
+.home-section h2 { font-size: 26px; font-weight: 900; letter-spacing: -0.02em; margin: 0 0 18px; }
+.home-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.home-card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+.home-card .k { font-size: 13px; font-weight: 700; color: var(--brass-text); }
+.home-card h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.home-card p { margin: 0; color: var(--ink-2); line-height: 1.6; font-size: 15px; }
+.step-n { width: 34px; height: 34px; border-radius: 17px; background: var(--ink); color: var(--gold); font-weight: 900; display: flex; align-items: center; justify-content: center; }
+.sound-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.sound-chips .chip { display: inline-flex; align-items: center; gap: 6px; }
+.sound-chips .chip svg { width: 14px; height: 14px; }
+.faq details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.faq details + details { margin-top: 8px; }
+.faq summary { font-weight: 700; cursor: pointer; }
+.faq p { margin: 10px 0 0; color: var(--ink-2); line-height: 1.65; }
+.home-foot { border-top: 1px solid var(--line); padding: 24px 0; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 820px) {
+  .home-hero { grid-template-columns: minmax(0, 1fr); padding-top: 16px; gap: 28px; }
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+  .home-cta .btn { flex: 1 1 auto; }
+}

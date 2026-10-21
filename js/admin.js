@@ -7,7 +7,11 @@ import {
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById } from './templates.js';
 import { KR_HOLIDAYS } from './holidays.js';
-import { BUILTIN_SOUNDS, isBuiltin, builtinName, playBell, stopAll, unlockAudio, fileDuration } from './sounds.js';
+import {
+  BUILTIN_SOUNDS, SOUND_CATS, isBuiltin, builtinName, resolveBuiltin, playBell, stopAll, unlockAudio, fileDuration,
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
+} from './sounds.js';
+import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
 const sheetRoot = document.getElementById('sheet');
@@ -53,6 +57,7 @@ const millis = ts => (ts && typeof ts.toMillis === 'function') ? ts.toMillis() :
 
 function soundName(id) {
   if (!id) return '기본 종';
+  if (id === 'none') return '소리 없음 (안내만)';
   if (isBuiltin(id)) return builtinName(id);
   const s = S.sounds.find(x => x.id === id);
   return s ? s.name : '(지워진 소리)';
@@ -94,11 +99,60 @@ async function copyText(t) {
 }
 
 function soundOptions(selected) {
-  const b = BUILTIN_SOUNDS.map(s => `<option value="${s.id}" ${s.id === selected ? 'selected' : ''}>${h(s.name)}</option>`).join('');
-  const u = S.sounds.map(s => `<option value="${h(s.id)}" ${s.id === selected ? 'selected' : ''}>${h(s.name)}</option>`).join('');
-  const missing = selected && !isBuiltin(selected) && !S.sounds.find(s => s.id === selected)
-    ? `<option value="${h(selected)}" selected>(지워진 소리)</option>` : '';
-  return `<optgroup label="기본 종소리">${b}</optgroup>${u ? `<optgroup label="올린 소리">${u}</optgroup>` : ''}${missing}`;
+  const sel = isBuiltin(selected) ? resolveBuiltin(selected) : selected;
+  const b = SOUND_CATS.map(c => `<optgroup label="${h(c.label)}">${BUILTIN_SOUNDS.filter(s => s.cat === c.id)
+    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</optgroup>`).join('');
+  const ups = S.sounds.filter(s => s.kind !== 'tts');
+  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('');
+  const missing = sel && sel !== 'none' && !isBuiltin(sel) && !ups.find(s => s.id === sel)
+    ? `<option value="${h(sel)}" selected>(지워진 소리)</option>` : '';
+  return `<option value="none" ${sel === 'none' ? 'selected' : ''}>소리 없음 (안내만)</option>${b}${u ? `<optgroup label="올린 소리">${u}</optgroup>` : ''}${missing}`;
+}
+const ttsCfg = () => Object.assign({ mode: 'device', voice: DEFAULT_VOICE, rate: 1 }, (S.space && S.space.tts) || {});
+const googleOn = () => ttsCfg().mode === 'google' && ttsAvailable();
+function ttsSummary() {
+  const c = ttsCfg();
+  if (c.mode === 'google' && ttsAvailable()) return `Google 고음질 · ${voiceLabel(c.voice)} · 속도 ${Number(c.rate).toFixed(1)}`;
+  if (c.mode === 'google') return 'Google 고음질 (API 키 설정 필요) — 지금은 기기 음성으로 읽어요';
+  return '기기 음성 · 재생기마다 그 기기의 목소리로 읽어요';
+}
+
+// 안내 문구 → Google 음성 파일 (같은 문구는 한 번만 만들어 계속 다시 씀)
+async function ensureTts(text) {
+  text = String(text || '').trim().slice(0, 120);
+  if (!text || !googleOn()) return '';
+  const c = ttsCfg();
+  const id = 'tts_' + await ttsKey(text, c.voice, c.rate);
+  if (S.sounds.find(s => s.id === id && s.url)) return id;
+  const snap = await F.getDoc(F.doc(sub('sounds'), id));
+  if (snap.exists() && snap.get('url')) return id;
+  const mp3 = await synthesize(text, c.voice, c.rate);
+  const path = `spaces/${S.spaceId}/sounds/${id}.mp3`;
+  const task = F.uploadBytesResumable(F.sRef(F.storage, path), new Blob([mp3], { type: 'audio/mpeg' }), { contentType: 'audio/mpeg' });
+  await new Promise((res, rej) => task.on('state_changed', null, rej, res));
+  const url = await F.getDownloadURL(task.snapshot.ref);
+  await F.setDoc(F.doc(sub('sounds'), id), {
+    name: ('안내 · ' + text).slice(0, 40), url, storagePath: path, contentType: 'audio/mpeg', size: mp3.length, duration: 0,
+    kind: 'tts', ttsText: text, ttsVoice: c.voice, createdAt: F.serverTimestamp(), by: S.user.uid
+  });
+  return id;
+}
+async function bellsWithTts(bells, onStep) {
+  const out = [];
+  let i = 0;
+  const need = bells.filter(b => b.say).length;
+  for (const b of bells) {
+    const nb = { ...b };
+    if (nb.say && googleOn()) { nb.sayId = await ensureTts(nb.say); if (onStep) onStep(++i, need); }
+    else delete nb.sayId;
+    out.push(nb);
+  }
+  return out;
+}
+function ttsError(e) {
+  console.error(e);
+  if (e && (e.status === 403 || e.status === 400)) toast('안내 음성을 만들지 못했어요. API 키 설정을 확인해주세요');
+  else toast('안내 음성을 만들지 못했어요. 잠시 뒤 다시 저장해주세요');
 }
 function ttOptions(selected, { none = true, inherit = false } = {}) {
   let o = '';
@@ -128,7 +182,7 @@ function renderLogin(errMsg) {
       ${errMsg ? `<div class="small" style="color:var(--danger)">${h(errMsg)}</div>` : ''}
       <div class="small muted">관리자만 로그인해요. 종을 울릴 기기는 로그인 없이 연결 번호로 연결해요.</div>
     </div>
-    <a class="small" href="play.html">이 기기를 재생기로 쓰기 →</a>
+    <div class="row" style="gap:18px;justify-content:center"><a class="small" href="index.html">← 벨키퍼 홈</a><a class="small" href="play.html">이 기기를 재생기로 쓰기 →</a></div>
   </div>`;
 }
 
@@ -301,7 +355,10 @@ function render() {
         <div class="small muted ellipsis">${S.tab === 'today' ? h(koreanDate(todayKey(Date.now(), tz()))) : h(sp.name || '')}</div>
         <h1 class="ellipsis">${h(titles[S.tab])}</h1>
       </div>
-      <button class="icon-btn" data-act="space-menu" aria-label="공간·계정 메뉴">${I.down}</button>
+      <div class="row" style="gap:8px">
+        <button class="icon-btn" data-act="space-menu" aria-label="공간 바꾸기·설정">${I.down}</button>
+        <button class="avatar-btn" data-act="account" aria-label="내 계정·로그아웃" title="${h(myEmail())}">${h((myName() || '?').slice(0, 1))}</button>
+      </div>
     </header>
     <main class="main">${S.ready ? views[S.tab]() : '<div class="muted center" style="padding:40px">불러오는 중…</div>'}</main>
   </div>`;
@@ -441,14 +498,25 @@ function viewTimetables() {
 
 // ── 종소리 ─────────────────────────────────────
 function viewSounds() {
-  return `<div class="section-title"><h2>기본 종소리</h2><span class="tiny muted">무료 · 인터넷 없이도 울림</span></div>
-  <div class="list">${BUILTIN_SOUNDS.map(s => `<div class="item">
-    <div class="grow"><div style="font-weight:500">${h(s.name)}</div><div class="small muted">${h(s.desc)}</div></div>
-    <button class="icon-btn soft" data-act="play-sound" data-id="${s.id}" aria-label="${h(s.name)} 듣기">${I.play}</button></div>`).join('')}</div>
+  const cat = S.soundCat || 'chime';
+  const ups = S.sounds.filter(s => s.kind !== 'tts');
+  const tts = S.sounds.filter(s => s.kind === 'tts');
+  return `<section class="card stack">
+    <div class="row between"><div class="small bold brass">안내 음성</div><button class="btn soft" data-act="tts-settings">목소리 설정</button></div>
+    <div style="font-weight:500">${h(ttsSummary())}</div>
+    <div class="small muted">일과표의 "안내 문구"를 이 목소리로 읽어요.</div>
+  </section>
 
-  <div class="section-title"><h2>올린 소리·음악</h2><span class="tiny muted">${S.sounds.length}개</span></div>
+  <div class="section-title"><h2>기본 종소리 ${BUILTIN_SOUNDS.length}종</h2><span class="tiny muted">무료 · 인터넷 없이도 울림</span></div>
+  <div class="chips">${SOUND_CATS.map(c => `<button class="chip ${cat === c.id ? 'on' : ''}" data-act="sound-cat" data-id="${c.id}">${h(c.label)} ${BUILTIN_SOUNDS.filter(s => s.cat === c.id).length}</button>`).join('')}</div>
+  <div class="list">${BUILTIN_SOUNDS.filter(s => s.cat === cat).map(s => `<div class="item">
+    <div class="grow"><div style="font-weight:500">${h(s.name)}</div><div class="small muted">${h(s.desc)} · ${Math.round(s.sec)}초</div></div>
+    <button class="icon-btn soft" data-act="play-sound" data-id="${s.id}" aria-label="${h(s.name)} 듣기">${I.play}</button></div>`).join('')}</div>
+  <button class="btn ghost" data-act="stop-all">재생 멈추기</button>
+
+  <div class="section-title"><h2>올린 소리·음악</h2><span class="tiny muted">${ups.length}개</span></div>
   <div class="list">
-    ${S.sounds.map(s => `<div class="item">
+    ${ups.map(s => `<div class="item">
       <div class="grow"><div class="ellipsis" style="font-weight:500">${h(s.name)}</div>
       <div class="small muted">${s.linked ? '공유받은 소리' : `${fmtDur(s.duration)} · ${fmtSize(s.size || 0)}`}</div></div>
       <button class="icon-btn soft" data-act="play-sound" data-id="${h(s.id)}" aria-label="${h(s.name)} 듣기">${I.play}</button>
@@ -456,11 +524,14 @@ function viewSounds() {
     <button class="btn dashed" data-act="upload">+ 소리·음악 파일 올리기</button>
   </div>
   <div class="tiny muted">MP3·M4A·WAV·OGG, 파일 하나 20MB까지. 음악은 일과표에서 "최대 재생 시간"을 정하면 그 시간에 맞춰 자연스럽게 줄어들며 끝나요.</div>
-  <button class="btn ghost" data-act="stop-all">재생 멈추기</button>
   <div class="row" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
     <button class="btn" data-act="library" data-kind="sound">공유 라이브러리</button>
     <button class="btn" data-act="import-code">공유 코드로 가져오기</button>
-  </div>`;
+  </div>
+  ${tts.length ? `<div class="section-title"><h2>만들어 둔 안내 음성</h2><span class="tiny muted">${tts.length}개</span></div>
+  <div class="list">${tts.map(s => `<div class="item"><div class="grow"><div class="ellipsis">${h(s.ttsText || s.name)}</div><div class="small muted">${h(voiceLabel(s.ttsVoice || ''))}</div></div>
+    <button class="icon-btn soft" data-act="play-sound" data-id="${h(s.id)}" aria-label="듣기">${I.play}</button></div>`).join('')}
+    <button class="btn" data-act="tts-cleanup">안 쓰는 안내 음성 지우기</button></div>` : ''}`;
 }
 
 // ── 기기 ─────────────────────────────────────
@@ -538,7 +609,7 @@ function renderSheet() {
   if (!sh) { sheetRoot.innerHTML = ''; document.body.style.overflow = ''; return; }
   document.body.style.overflow = 'hidden';
   const fn = {
-    'space-menu': sheetSpaceMenu, 'space-new': () => sheetFrame('새 공간', renderOnboarding(false)), 'space-edit': sheetSpaceEdit, 'admins': sheetAdmins, 'holidays': sheetHolidays,
+    'space-menu': sheetSpaceMenu, 'space-new': () => sheetFrame('새 공간', renderOnboarding(false)), 'space-edit': sheetSpaceEdit, 'admins': sheetAdmins, 'holidays': sheetHolidays, 'tts': sheetTts, 'account': sheetAccount,
     'ring': sheetRing, 'date': sheetDate, 'rule': sheetRule,
     'tt-new': sheetTtNew, 'tt-templates': sheetTemplates, 'tt-edit': sheetTtEdit,
     'share': sheetShare, 'import': sheetImport, 'library': sheetLibrary,
@@ -550,7 +621,7 @@ function renderSheet() {
 }
 
 function sheetSpaceMenu() {
-  return sheetFrame('공간·계정', `
+  return sheetFrame('공간', `
     <div class="list">${S.spaces.map(s => `<button class="item" data-act="space-open" data-id="${h(s.id)}">
       <div class="grow"><div class="bold">${h(s.name)}</div><div class="small muted">${h((SPACE_TYPES.find(t => t.id === s.type) || {}).label || '')}</div></div>
       ${s.id === S.spaceId ? '<span class="badge dark">지금</span>' : ''}</button>`).join('')}
@@ -585,6 +656,46 @@ function sheetAdmins() {
     <div class="small muted">초대받은 분이 <b>${h(link)}</b> 에 그 구글 계정으로 로그인하면 초대 수락 버튼이 보여요. 관리자는 일과표·달력·소리·기기를 모두 바꿀 수 있어요.</div>
     <button class="btn block" data-act="copy" data-text="${h(`[벨키퍼] '${sp.name || ''}' 관리자로 초대했어요. ${link} 에서 초대받은 구글 계정으로 로그인하면 수락할 수 있어요.`)}">초대 안내 문구 복사</button>`, { back: 'space-menu' });
 }
+function sheetTts(sh) {
+  const d = sh.draft;
+  const dv = deviceVoices();
+  const pref = getDeviceVoicePref();
+  const group = g => GOOGLE_VOICES.filter(v => v.gender === g && v.tier === 'HD').map(v => `<option value="${v.id}" ${d.voice === v.id ? 'selected' : ''}>${h(v.label)}</option>`).join('');
+  return sheetFrame('안내 음성', `
+    <div class="chips">
+      <button class="chip ${d.mode === 'google' ? 'on' : ''}" data-act="tts-mode" data-id="google">Google 고음질</button>
+      <button class="chip ${d.mode === 'device' ? 'on' : ''}" data-act="tts-mode" data-id="device">기기 음성</button>
+    </div>
+    ${d.mode === 'google' ? `
+      ${ttsAvailable() ? '' : `<div class="banner warn">아직 Google 음성 API 키가 없어요. 안내서의 [안내 음성] 순서대로 키를 만들어 보내 주시면 다음 업데이트에 넣어 드릴게요. 그전까지는 기기 음성으로 읽어요.</div>`}
+      <div class="small muted">한 번 만든 안내 음성은 파일로 저장돼서 모든 재생기에서 똑같은 목소리로 나와요. 매달 100만 자까지 무료라 보통은 비용이 들지 않아요.</div>
+      <label class="field"><span>목소리 (Chirp 3 HD · 30종)</span><select class="input" data-t="voice">
+        <optgroup label="여성">${group('여성')}</optgroup><optgroup label="남성">${group('남성')}</optgroup>
+        <optgroup label="안내 방송 느낌 (WaveNet)">${GOOGLE_VOICES.filter(v => v.tier === 'WaveNet').map(v => `<option value="${v.id}" ${d.voice === v.id ? 'selected' : ''}>${h(v.label)}</option>`).join('')}</optgroup>
+      </select></label>
+      <label class="field"><span>말하기 속도 <b class="num" id="tts-rate-lab">${Number(d.rate).toFixed(1)}</b></span><input type="range" min="0.7" max="1.3" step="0.1" data-t="rate" value="${d.rate}"></label>
+      <label class="field"><span>미리 들어볼 문구</span><input class="input" id="tts-sample" maxlength="80" value="점심시간입니다. 맛있게 드세요."></label>
+      <button class="btn block" data-act="tts-preview" ${ttsAvailable() ? '' : 'disabled'}>${I.play} 미리 듣기</button>
+    ` : `
+      <div class="small muted">설정 없이 무료로 쓸 수 있어요. 대신 재생기마다 그 기기에 들어 있는 목소리로 읽어서, 기기에 따라 목소리가 달라요. 재생기 화면의 [설정]에서 목소리를 고를 수 있어요.</div>
+      <label class="field"><span>이 기기의 한국어 목소리 (미리 듣기용)</span><select class="input" id="dv-voice">
+        ${dv.length ? dv.map(v => `<option value="${h(v.voiceURI)}" ${pref.uri === v.voiceURI ? 'selected' : ''}>${h(v.name)}</option>`).join('') : '<option value="">기본 목소리</option>'}
+      </select></label>
+      <label class="field"><span>미리 들어볼 문구</span><input class="input" id="tts-sample" maxlength="80" value="점심시간입니다. 맛있게 드세요."></label>
+      <button class="btn block" data-act="tts-preview-device">${I.play} 이 기기에서 미리 듣기</button>
+    `}
+    <button class="btn primary lg block" data-act="tts-save">저장</button>
+    ${d.mode === 'google' && ttsAvailable() ? '<div class="tiny muted">목소리를 바꾸고 저장하면 모든 일과표의 안내 음성을 새 목소리로 다시 만들어요.</div>' : ''}`);
+}
+function sheetAccount() {
+  return sheetFrame('내 계정', `
+    <div class="card row"><div class="avatar">${h((myName() || '?').slice(0, 1))}</div>
+      <div class="grow"><div class="bold ellipsis">${h(myName())}</div><div class="small muted ellipsis">${h(myEmail())}</div></div></div>
+    <a class="btn block" href="index.html">벨키퍼 홈으로</a>
+    <a class="btn block" href="play.html">이 기기를 재생기로 쓰기</a>
+    <button class="btn block danger" data-act="logout">로그아웃</button>
+    <div class="tiny muted center">벨키퍼 ${APP_VERSION}</div>`);
+}
 function sheetHolidays(sh) {
   const tk = todayKey(Date.now(), tz());
   const days = new Set(S.rules.filter(r => r.kind === 'day').map(r => r.date));
@@ -613,7 +724,7 @@ function sheetSpaceEdit() {
 }
 
 function sheetRing() {
-  const opts = [...BUILTIN_SOUNDS.map(s => ({ id: s.id, name: s.name })), ...S.sounds.map(s => ({ id: s.id, name: s.name }))];
+  const opts = [...BUILTIN_SOUNDS.map(s => ({ id: s.id, name: s.name })), ...S.sounds.filter(s => s.kind !== 'tts').map(s => ({ id: s.id, name: s.name }))];
   return sheetFrame('지금 울리기', `
     <div class="small muted">연결된 모든 재생기에서 바로 울려요.</div>
     <div class="list">${opts.map(o => `<div class="item"><div class="grow" style="font-weight:500">${h(o.name)}</div>
@@ -718,7 +829,7 @@ function sheetTtEdit(sh) {
 
 function sheetShare(sh) {
   if (sh.result) {
-    const link = new URL('index.html', location.href).href.replace(/\?.*$/, '') + '?share=' + sh.result;
+    const link = new URL('app.html', location.href).href.replace(/\?.*$/, '') + '?share=' + sh.result;
     return sheetFrame('공유 코드', `
       <div class="card stack center"><div class="small muted">${h(sh.name)}</div>
       <div class="next-time num" style="letter-spacing:0.08em">${h(sh.result)}</div>
@@ -900,8 +1011,14 @@ async function saveTimetable() {
   const name = (d.name || '').trim() || '이름 없는 일과표';
   const bad = d.bells.find(b => !/^\d{2}:\d{2}/.test(b.time || ''));
   if (bad) { toast('시각이 비어 있는 종이 있어요'); return; }
-  const bells = cleanBells(d.bells);
+  let bells = cleanBells(d.bells);
+  const btn = sheetRoot.querySelector('[data-act="tt-save"]');
   try {
+    if (googleOn() && bells.some(b => b.say)) {
+      if (btn) { btn.disabled = true; btn.textContent = '안내 음성 만드는 중…'; }
+      try { bells = await bellsWithTts(bells, (i, n) => { if (btn) btn.textContent = `안내 음성 만드는 중… ${i}/${n}`; }); }
+      catch (e) { ttsError(e); bells = bells.map(b => { const x = { ...b }; delete x.sayId; return x; }); }
+    }
     if (d.id) await F.updateDoc(F.doc(sub('timetables'), d.id), { name, bells, updatedAt: F.serverTimestamp() });
     else await F.addDoc(sub('timetables'), { name, bells, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() });
     closeIf(sh); toast('저장했어요');
@@ -980,7 +1097,7 @@ async function uploadSound() {
     });
 }
 
-function soundInUse(id) { return S.timetables.filter(t => (t.bells || []).some(b => b.soundId === id)); }
+function soundInUse(id) { return S.timetables.filter(t => (t.bells || []).some(b => b.soundId === id || b.sayId === id)); }
 function ttInUse(id) { return S.rules.filter(r => r.ttId === id || Object.values(r.days || {}).includes(id)); }
 
 // 한곳에서 모든 클릭 처리
@@ -1027,6 +1144,57 @@ document.addEventListener('click', async e => {
         return toast('내보냈어요');
       }
       case 'holidays': return openSheet({ type: 'holidays', pick: {} });
+      case 'account': return openSheet({ type: 'account' });
+      case 'sound-cat': S.soundCat = id; return render();
+      case 'tts-settings': return openSheet({ type: 'tts', draft: { ...ttsCfg() } });
+      case 'tts-mode': sh.draft.mode = id; return renderSheet();
+      case 'tts-preview': {
+        const text = document.getElementById('tts-sample').value.trim();
+        if (!text) return;
+        el.disabled = true;
+        try {
+          const mp3 = await synthesize(text, sh.draft.voice, sh.draft.rate);
+          const url = URL.createObjectURL(new Blob([mp3], { type: 'audio/mpeg' }));
+          playBell({ soundId: 'none', say: 'x', sayId: '__p' }, { __p: { url } });
+        } catch (e) { ttsError(e); } finally { el.disabled = false; }
+        return;
+      }
+      case 'tts-preview-device': {
+        const uri = document.getElementById('dv-voice').value;
+        setDeviceVoicePref(uri, getDeviceVoicePref().rate);
+        return speak(document.getElementById('tts-sample').value.trim() || '안녕하세요', 100, { uri });
+      }
+      case 'tts-save': {
+        const d = sh.draft, before = ttsCfg();
+        await F.updateDoc(spaceRef(), { tts: { mode: d.mode, voice: d.voice || DEFAULT_VOICE, rate: Math.round(Number(d.rate || 1) * 10) / 10 } });
+        closeIf(sh);
+        const changed = d.mode === 'google' && ttsAvailable() && (before.mode !== 'google' || before.voice !== d.voice || Number(before.rate) !== Number(d.rate));
+        if (changed && S.timetables.some(t => (t.bells || []).some(b => b.say))) {
+          S.space.tts = { mode: d.mode, voice: d.voice, rate: Math.round(Number(d.rate || 1) * 10) / 10 };
+          toast('모든 일과표의 안내 음성을 새 목소리로 만드는 중…');
+          try {
+            for (const t of S.timetables) {
+              if (!(t.bells || []).some(b => b.say)) continue;
+              const bells = await bellsWithTts(cleanBells(t.bells));
+              await F.updateDoc(F.doc(sub('timetables'), t.id), { bells, updatedAt: F.serverTimestamp() });
+            }
+            toast('안내 음성을 모두 새 목소리로 바꿨어요');
+          } catch (e) { ttsError(e); }
+        } else toast('저장했어요');
+        return;
+      }
+      case 'tts-cleanup': {
+        const used = new Set();
+        S.timetables.forEach(t => (t.bells || []).forEach(b => { if (b.sayId) used.add(b.sayId); }));
+        const old = S.sounds.filter(s => s.kind === 'tts' && !used.has(s.id));
+        if (!old.length) return toast('지울 안내 음성이 없어요');
+        if (!confirm(`일과표에서 쓰지 않는 안내 음성 ${old.length}개를 지울까요?`)) return;
+        for (const s of old) {
+          if (s.storagePath) { try { await F.deleteObject(F.sRef(F.storage, s.storagePath)); } catch (err) { console.warn(err); } }
+          await F.deleteDoc(F.doc(sub('sounds'), s.id));
+        }
+        return toast('지웠어요');
+      }
       case 'hol-all': {
         sheetRoot.querySelectorAll('[data-hol]').forEach(c => { if (!c.disabled) c.checked = el.dataset.v === '1'; });
         return;
@@ -1049,8 +1217,14 @@ document.addEventListener('click', async e => {
       // 오늘
       case 'ring-now': return openSheet({ type: 'ring' });
       case 'ring-send': {
-        const say = (document.getElementById('ring-say') || {}).value || '';
-        await sendCommand({ type: 'ring', soundId: id, say: say.slice(0, 120), label: '지금 울리기' });
+        const say = ((document.getElementById('ring-say') || {}).value || '').trim().slice(0, 120);
+        const cmd = { type: 'ring', soundId: id, say, label: '지금 울리기' };
+        if (say && googleOn()) {
+          el.disabled = true; el.textContent = '음성 만드는 중…';
+          try { const sid = await ensureTts(say); const snd = await F.getDoc(F.doc(sub('sounds'), sid)); if (snd.exists()) cmd.sayUrl = snd.get('url'); }
+          catch (e) { ttsError(e); }
+        }
+        await sendCommand(cmd);
         closeIf(sh); return toast(S.devices.length ? '재생기로 보냈어요' : '연결된 재생기가 없어요');
       }
       case 'ring-stop': await sendCommand({ type: 'stop' }); closeIf(sh); return toast('멈춤 신호를 보냈어요');
@@ -1206,6 +1380,10 @@ document.addEventListener('input', e => {
     b[f] = (f === 'volume' || f === 'maxSec') ? Number(t.value) : t.value;
     if (f === 'volume') { const lab = t.closest('label').querySelector('span'); if (lab) lab.textContent = `음량 ${t.value}%`; }
   }
+  if (sh.type === 'tts' && t.dataset.t) {
+    sh.draft[t.dataset.t] = t.dataset.t === 'rate' ? Number(t.value) : t.value;
+    if (t.dataset.t === 'rate') { const l = document.getElementById('tts-rate-lab'); if (l) l.textContent = Number(t.value).toFixed(1); }
+  }
   if (sh.type === 'rule') {
     if (t.dataset.r) sh.draft[t.dataset.r] = t.value;
     if (t.dataset.rd != null) { sh.draft.days = sh.draft.days || {}; sh.draft.days[t.dataset.rd] = t.value; }
@@ -1251,7 +1429,15 @@ if (!F.configured) {
   F.getRedirectResult(F.auth).catch(e => console.warn(e));
   F.onAuthStateChanged(F.auth, async user => {
     stopSubs();
-    if (!user || user.isAnonymous) { S.user = null; renderLogin(); return; }
+    if (!user || user.isAnonymous) {
+      S.user = null;
+      if (new URLSearchParams(location.search).get('login') === '1') {
+        history.replaceState(null, '', location.pathname);
+        F.signInWithRedirect(F.auth, new F.GoogleAuthProvider()).catch(() => renderLogin());
+        return;
+      }
+      renderLogin(); return;
+    }
     S.user = user;
     root.innerHTML = '<div class="hero"><div class="logo">' + I.logo + '</div><div class="muted">불러오는 중…</div></div>';
     try {

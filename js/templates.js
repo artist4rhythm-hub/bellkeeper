@@ -71,18 +71,18 @@ export const TEMPLATES = [
     id: 'academy', category: 'academy', name: '학원 (50분 수업 · 오후)',
     bells: lessons({
       first: '15:00', count: 3, len: 50, brk: 10, lunchAfter: 3, lunchLen: 50, lunchLabel: '저녁 식사', lunchSay: '저녁 시간입니다.',
-      startSound: 'b:marimba', endSound: 'b:dingdong',
+      startSound: 'b:glock_up', endSound: 'b:dingdong',
       extra: [
-        { time: '18:40', label: '4교시 시작', soundId: 'b:marimba' },
+        { time: '18:40', label: '4교시 시작', soundId: 'b:glock_up' },
         { time: '19:30', label: '4교시 끝', soundId: 'b:dingdong' },
-        { time: '19:40', label: '5교시 시작', soundId: 'b:marimba' },
+        { time: '19:40', label: '5교시 시작', soundId: 'b:glock_up' },
         { time: '20:30', label: '5교시 끝 · 귀가', soundId: 'b:down3', say: '오늘도 수고했어요. 조심히 가세요.' }
       ]
     })
   },
   {
     id: 'academy-weekend', category: 'academy', name: '학원 주말 (80분 수업)',
-    bells: lessons({ first: '10:00', count: 4, len: 80, brk: 10, lunchAfter: 2, lunchLen: 60, startSound: 'b:marimba', endSound: 'b:dingdong' })
+    bells: lessons({ first: '10:00', count: 4, len: 80, brk: 10, lunchAfter: 2, lunchLen: 60, startSound: 'b:glock_up', endSound: 'b:dingdong' })
   },
   {
     id: 'company', category: 'company', name: '회사 (9시 출근 · 6시 퇴근)',
@@ -92,7 +92,7 @@ export const TEMPLATES = [
       { time: '10:30', label: '휴식', soundId: 'b:dingdong' },
       { time: '12:00', label: '점심시간', soundId: 'b:up3', say: '점심시간입니다.' },
       { time: '13:00', label: '오후 업무 시작', soundId: 'b:westminster' },
-      { time: '15:00', label: '스트레칭', soundId: 'b:marimba', say: '잠시 일어나서 스트레칭 해볼까요.' },
+      { time: '15:00', label: '스트레칭', soundId: 'b:glock_up', say: '잠시 일어나서 스트레칭 해볼까요.' },
       { time: '18:00', label: '퇴근', soundId: 'b:down3', say: '오늘도 수고하셨습니다.' }
     ]
   },
@@ -112,7 +112,7 @@ export const TEMPLATES = [
   {
     id: 'church', category: 'church', name: '수련회·캠프 (하루 일정)',
     bells: [
-      { time: '07:00', label: '기상', soundId: 'b:marimba', say: '좋은 아침입니다. 일어날 시간이에요.' },
+      { time: '07:00', label: '기상', soundId: 'b:glock_up', say: '좋은 아침입니다. 일어날 시간이에요.' },
       { time: '07:30', label: '아침 모임', soundId: 'b:up3' },
       { time: '08:30', label: '아침 식사', soundId: 'b:dingdong' },
       { time: '10:00', label: '오전 모임', soundId: 'b:westminster' },

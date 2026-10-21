@@ -2,7 +2,7 @@
   "name": "벨키퍼 — 자동 종소리",
   "short_name": "벨키퍼",
   "description": "학교·학원·회사를 위한 자동 종소리",
-  "start_url": "./index.html",
+  "start_url": "./app.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#F4F5F2",

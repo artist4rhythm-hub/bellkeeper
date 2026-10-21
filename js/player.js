@@ -3,7 +3,10 @@ import * as F from './fb.js';
 import {
   APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, fmtRemain, fmtClock, escapeHtml as h, cleanBells
 } from './core.js';
-import { playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin } from './sounds.js';
+import {
+  playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins,
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
+} from './sounds.js';
 
 const el = document.getElementById('pl');
 const gate = document.getElementById('gate');
@@ -172,7 +175,10 @@ function startRunning() {
       if (at < P.listenSince || now() - at > 120000) continue;
       if (c.target && c.target !== P.uid) continue;
       if (c.type === 'stop') { stopAll(); hideRinging(); }
-      if (c.type === 'ring') ring({ soundId: c.soundId, say: c.say || '', label: c.label || '지금 울리기', volume: 100 });
+      if (c.type === 'ring') {
+        const extra = c.sayUrl ? { __cmd: { url: c.sayUrl } } : null;
+        ring({ soundId: c.soundId, say: c.say || '', sayId: c.sayUrl ? '__cmd' : '', label: c.label || '지금 울리기', volume: 100 }, extra);
+      }
     }
   }, onErr));
   refreshOffset();
@@ -198,8 +204,10 @@ function recompute() {
   for (const b of P.upcoming) {
     if (b.at - n > 2 * 86400000) break;
     if (!isBuiltin(b.soundId) && byId[b.soundId] && byId[b.soundId].url) { keep.add(byId[b.soundId].url); preloadUrl(byId[b.soundId].url); }
+    if (b.sayId && byId[b.sayId] && byId[b.sayId].url) { keep.add(byId[b.sayId].url); preloadUrl(byId[b.sayId].url); }
   }
   forgetUnused(keep);
+  preloadBuiltins([...new Set(P.upcoming.slice(0, 60).map(b => b.soundId))]);
   draw();
 }
 
@@ -220,9 +228,9 @@ async function heartbeat() {
 }
 
 // ── 종 울리기 ─────────────────────────────────────
-function ring(b) {
+function ring(b, extra) {
   showRinging(b);
-  const ctl = playBell(b, soundsById());
+  const ctl = playBell(b, Object.assign(soundsById(), extra || {}));
   P.ringing = ctl;
   ctl.finished.then(() => { if (P.ringing === ctl) { P.ringing = null; hideRinging(); } });
 }
@@ -326,6 +334,11 @@ function openMenu() {
     <div class="chips"><button class="chip ${P.mode === 'light' ? 'on' : ''}" data-pl="mode" data-v="light">시계형 (밝게)</button>
       <button class="chip ${P.mode === 'dark' ? 'on' : ''}" data-pl="mode" data-v="dark">카운트다운형 (어둡게)</button></div>
     <button class="btn block" data-pl="fullscreen">전체 화면</button>
+    <div class="field"><span class="small bold">기기 음성 (Google 음성을 안 쓸 때 안내 문구를 읽는 목소리)</span>
+      <select class="input" id="pl-voice">${(() => { const pref = getDeviceVoicePref(); const vs = deviceVoices();
+        return vs.length ? vs.map(v => `<option value="${h(v.voiceURI)}" ${pref.uri === v.voiceURI ? 'selected' : ''}>${h(v.name)}</option>`).join('') : '<option value="">기본 목소리</option>'; })()}</select>
+      <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow">
+      <button class="btn" data-pl="voice-test">들어보기</button></div></div>
     <button class="btn block" data-pl="test">소리 시험</button>
     <div class="tiny muted">벨키퍼 ${APP_VERSION} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중</div>
     <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button>
@@ -337,8 +350,18 @@ document.addEventListener('click', async e => {
   if (!b) return;
   const a = b.dataset.pl;
   if (a === 'test') { await unlockAudio(); ring({ soundId: 'b:dingdong', label: '소리 시험', volume: 100 }); }
+  if (a === 'voice-test') {
+    const uri = document.getElementById('pl-voice').value, rate = Number(document.getElementById('pl-rate').value) || 1;
+    setDeviceVoicePref(uri, rate);
+    await unlockAudio();
+    speak('안녕하세요. 벨키퍼 안내 방송입니다.', 100, { uri, rate });
+  }
   if (a === 'menu') openMenu();
-  if (a === 'close') { gate.classList.add('hidden'); draw(); }
+  if (a === 'close') {
+    const v = document.getElementById('pl-voice'), r = document.getElementById('pl-rate');
+    if (v) setDeviceVoicePref(v.value, Number(r.value) || 1);
+    gate.classList.add('hidden'); draw();
+  }
   if (a === 'mode') { P.mode = b.dataset.v; localStorage.setItem(LS_MODE, P.mode); openMenu(); draw(); heartbeat(); }
   if (a === 'fullscreen') { try { await document.documentElement.requestFullscreen(); } catch (err) { /* 무시 */ } gate.classList.add('hidden'); }
   if (a === 'unlink') {

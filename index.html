@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>벨키퍼 — 학교·학원·회사를 위한 자동 종소리</title>
-<meta name="description" content="휴대폰으로 설정하고, PC·태블릿에서 정해진 시간에 자동으로 울리는 종소리 서비스">
+<meta name="description" content="휴대폰으로 일과표를 정하면, PC·태블릿이 정해진 시간에 정확하게 종을 울려요. 학교·학원·회사를 위한 자동 종소리 서비스.">
 <meta name="theme-color" content="#17231F">
+<meta property="og:title" content="벨키퍼 — 학교·학원·회사를 위한 자동 종소리">
+<meta property="og:description" content="휴대폰으로 일과표를 정하면, PC·태블릿이 정해진 시간에 정확하게 종을 울려요.">
+<meta property="og:image" content="icons/icon-512.png">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,9 +18,80 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div id="root"><div class="hero"><div class="muted">불러오는 중…</div></div></div>
+<div class="home">
+  <nav class="home-nav" aria-label="위쪽 메뉴">
+    <a class="home-brand" href="index.html">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="14" r="5" fill="#17231F"/><path d="M60 20 C40 20 28 36 28 58 L28 78 L18 90 L102 90 L92 78 L92 58 C92 36 80 20 60 20 Z" fill="#17231F"/><circle cx="60" cy="102" r="8" fill="#B07D1E"/><line x1="60" y1="58" x2="60" y2="38" stroke="#F4F5F2" stroke-width="5" stroke-linecap="round"/><line x1="60" y1="58" x2="74" y2="66" stroke="#B07D1E" stroke-width="5" stroke-linecap="round"/></svg>
+      벨키퍼
+    </a>
+    <div class="row" id="nav-account" style="gap:8px">
+      <button class="btn primary" data-home="login">로그인</button>
+    </div>
+  </nav>
+
+  <header class="home-hero">
+    <div>
+      <h1>종은 <em>벨키퍼</em>가 칠게요.<br>선생님은 수업만.</h1>
+      <p class="lead">휴대폰으로 일과표를 정해 두면, 교무실 PC나 복도의 태블릿이 정해진 시각에 정확하게 종을 울려요. 학교·학원·회사 어디서든 인터넷만 있으면 돼요.</p>
+      <div class="home-cta" id="hero-cta">
+        <button class="btn gold" data-home="login">Google 계정으로 시작하기</button>
+        <a class="btn" href="play.html">이 기기를 재생기로 쓰기</a>
+      </div>
+      <p class="small muted" style="margin-top:14px">지금은 무료로 쓸 수 있어요. 학생 개인정보는 전혀 받지 않아요.</p>
+    </div>
+    <div class="home-panel" aria-label="재생기 화면 예시">
+      <div class="row between"><span class="small muted">다음 종</span><span class="small" style="color:#4CC28A;font-weight:700">● 재생기 2대 정상</span></div>
+      <div class="row" style="align-items:baseline;gap:12px"><div class="big num">10:40</div><div style="font-size:20px;font-weight:700">3교시 시작종</div></div>
+      <div class="muted">웨스트민스터 차임 · 18분 남음</div>
+      <div>
+        <div class="row-b"><b class="num">11:25</b><span>3교시 종료종</span></div>
+        <div class="row-b"><b class="num">12:20</b><span>점심시간 · "맛있게 드세요"</span></div>
+        <div class="row-b"><b class="num">15:30</b><span>하교 · 브람스 자장가</span></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="home-section" aria-labelledby="h-how">
+    <h2 id="h-how">이렇게 써요</h2>
+    <div class="home-grid">
+      <div class="home-card"><div class="step-n">1</div><h3>공간 만들기</h3><p>구글 계정으로 로그인하고 학교·학원·회사를 만들어요. 종류에 맞는 샘플 일과표가 자동으로 들어가요.</p></div>
+      <div class="home-card"><div class="step-n">2</div><h3>일과표·달력 정하기</h3><p>요일별 일과표, 학기 같은 기간, 시험 주간, 공휴일까지 달력에서 정해요. 휴대폰으로도 충분해요.</p></div>
+      <div class="home-card"><div class="step-n">3</div><h3>재생기 연결</h3><p>스피커에 연결된 PC나 태블릿에서 QR을 찍으면 끝. 기기 시계가 틀려도 서버 시간에 맞춰 정확하게 울려요.</p></div>
+    </div>
+  </section>
+
+  <section class="home-section" aria-labelledby="h-sound">
+    <h2 id="h-sound">종소리 들어보기</h2>
+    <p class="muted" style="margin-top:-6px">기본 종소리 43종이 무료로 들어 있어요. 음악이나 직접 녹음한 소리도 올릴 수 있어요.</p>
+    <div class="sound-chips" id="sound-chips"></div>
+  </section>
+
+  <section class="home-section" aria-labelledby="h-feat">
+    <h2 id="h-feat">이런 것도 돼요</h2>
+    <div class="home-grid">
+      <div class="home-card"><div class="k">안내 방송</div><h3>목소리로 알려줘요</h3><p>"점심시간입니다"처럼 적어 두면 종소리 뒤에 읽어 줘요. Google 고음질 목소리 30종 중에서 고를 수 있어요.</p></div>
+      <div class="home-card"><div class="k">함께 관리</div><h3>관리자 초대</h3><p>교무부장, 행정실 선생님을 이메일로 초대해 함께 일과표를 고쳐요.</p></div>
+      <div class="home-card"><div class="k">나눔</div><h3>일과표·소리 공유</h3><p>잘 만든 일과표와 소리를 6자리 코드로 다른 학교에 나눠 줄 수 있어요.</p></div>
+      <div class="home-card"><div class="k">원격</div><h3>지금 울리기</h3><p>행사나 비상 상황에는 휴대폰에서 바로 모든 재생기를 울리고, 멈출 수 있어요.</p></div>
+      <div class="home-card"><div class="k">안정성</div><h3>인터넷이 잠깐 끊겨도</h3><p>재생기는 앞으로 7일 일정과 기본 종소리를 기기에 저장해 두고 제시간에 울려요.</p></div>
+      <div class="home-card"><div class="k">공휴일</div><h3>한 번에 쉬는 날 넣기</h3><p>공휴일과 대체공휴일을 버튼 하나로 "종 없음"으로 넣어요.</p></div>
+    </div>
+  </section>
+
+  <section class="home-section faq" aria-labelledby="h-faq">
+    <h2 id="h-faq">자주 묻는 질문</h2>
+    <details><summary>어떤 기기가 재생기로 좋아요?</summary><p>충전기를 꽂아 둔 안드로이드 태블릿이나 PC를 추천해요. 아이패드는 화면이 꺼지면 소리가 멈춰서, 화면을 켜 두는 전용 기기로 써야 해요.</p></details>
+    <details><summary>방송 스피커에 연결할 수 있나요?</summary><p>네. 재생기 기기의 이어폰 단자(AUX)나 블루투스로 방송 앰프·스피커에 연결하면 학교 전체에 울려요.</p></details>
+    <details><summary>재생기도 로그인해야 하나요?</summary><p>아니요. 관리자 화면에서 만든 6자리 번호(또는 QR)로 연결해요. 공용 기기에 개인 계정을 남기지 않아도 돼요.</p></details>
+    <details><summary>비용이 드나요?</summary><p>지금은 무료로 쓸 수 있어요. 나중에 유료 요금제가 생기더라도 기본 기능은 무료로 남겨 둘 계획이에요.</p></details>
+  </section>
+
+  <footer class="home-foot">
+    <span>벨키퍼 · 학교·학원·회사를 위한 자동 종소리</span>
+    <span><a href="app.html">관리자 화면</a> · <a href="play.html">재생기</a></span>
+  </footer>
+</div>
 <div id="sheet"></div>
-<noscript><div class="hero">자바스크립트를 켜야 벨키퍼를 쓸 수 있어요.</div></noscript>
-<script type="module" src="js/admin.js"></script>
+<script type="module" src="js/home.js"></script>
 </body>
 </html>
