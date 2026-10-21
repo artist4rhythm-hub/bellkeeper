@@ -1,10 +1,9 @@
-// ▼ Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹)에서 복사한 값을 그대로 붙여넣으세요.
-// "업로드 순서 안내.txt" 6단계를 참고하세요.
+// ▼ 벨키퍼 Firebase 설정 (bellkeeper-6f169)
 export const firebaseConfig = {
-  apiKey: "여기에_붙여넣기",
-  authDomain: "여기에_붙여넣기",
-  projectId: "여기에_붙여넣기",
-  storageBucket: "여기에_붙여넣기",
-  messagingSenderId: "여기에_붙여넣기",
-  appId: "여기에_붙여넣기"
+  apiKey: "AIzaSyBmZ8VyqM0nGFjTMt33Jj-QMPqbpQHVC60",
+  authDomain: "bellkeeper-6f169.firebaseapp.com",
+  projectId: "bellkeeper-6f169",
+  storageBucket: "bellkeeper-6f169.firebasestorage.app",
+  messagingSenderId: "818536272632",
+  appId: "1:818536272632:web:5752f7b07e061f409be10d"
 };
