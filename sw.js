@@ -1,10 +1,10 @@
 // 벨키퍼 서비스 워커 — 인터넷이 끊겨도 화면과 기본 종소리가 뜨도록 앱 파일을 저장해 둡니다.
-const CACHE = 'bellkeeper-v1.2.1';
+const CACHE = 'bellkeeper-v1.3.0';
 const SOUNDS = 'bellkeeper-sounds-v1';   // 기본 종소리는 바뀌지 않으니 따로 오래 보관
 const SHELL = [
   './', './index.html', './app.html', './play.html', './css/style.css',
   './js/home.js', './js/admin.js', './js/player.js', './js/core.js', './js/sounds.js', './js/templates.js',
-  './js/holidays.js', './js/tts.js', './js/tts-config.js', './js/fb.js', './js/firebase-config.js',
+  './js/holidays.js', './js/tts.js', './js/tts-config.js', './js/version.js', './js/fb.js', './js/firebase-config.js',
   './manifest.json', './manifest-play.json',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
 ];
@@ -20,14 +20,16 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // 기본 종소리: 저장본 먼저 (한 번 받으면 인터넷 없이도 울림)
-  if (url.origin === location.origin && url.pathname.includes('/sounds/')) {
+  // 기본 종소리·배경음악: 저장본 먼저 (한 번 받으면 인터넷 없이도 울림)
+  if (url.origin === location.origin && (url.pathname.includes('/sounds/') || url.pathname.includes('/bgm/'))) {
     e.respondWith(caches.open(SOUNDS).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok && res.status === 200) c.put(req, res.clone());
       return res;
     }))));
     return;
   }
+  // 버전 확인은 항상 인터넷에서
+  if (url.origin === location.origin && url.pathname.endsWith('version.json')) return;
   // 우리 앱 파일: 인터넷 먼저, 안 되면 저장본
   if (url.origin === location.origin) {
     e.respondWith(fetch(req).then(res => {

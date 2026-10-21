@@ -3,8 +3,9 @@ import * as F from './fb.js';
 import {
   APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, fmtRemain, fmtClock, escapeHtml as h, cleanBells
 } from './core.js';
+import { watchUpdates, reloadToLatest } from './version.js';
 import {
-  playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins,
+  playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
 } from './sounds.js';
 
@@ -22,7 +23,7 @@ const P = {
   uid: null, saved: null, space: null, timetables: [], rules: [], sounds: [],
   offset: 0, offsetOk: false, running: false, unsub: [], seenCmd: null,
   mode: localStorage.getItem(LS_MODE) || 'light',
-  upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false
+  upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null
 };
 const now = () => Date.now() + P.offset;
 const tz = () => (P.space && P.space.timezone) || 'Asia/Seoul';
@@ -177,7 +178,7 @@ function startRunning() {
       if (c.type === 'stop') { stopAll(); hideRinging(); }
       if (c.type === 'ring') {
         const extra = c.sayUrl ? { __cmd: { url: c.sayUrl } } : null;
-        ring({ soundId: c.soundId, say: c.say || '', sayId: c.sayUrl ? '__cmd' : '', label: c.label || '지금 울리기', volume: 100 }, extra);
+        ring({ soundId: c.soundId, say: c.say || '', sayId: c.sayUrl ? '__cmd' : '', bgmId: c.bgmId || '', bgmVol: c.bgmVol || 30, label: c.label || '지금 울리기', volume: 100 }, extra);
       }
     }
   }, onErr));
@@ -205,9 +206,11 @@ function recompute() {
     if (b.at - n > 2 * 86400000) break;
     if (!isBuiltin(b.soundId) && byId[b.soundId] && byId[b.soundId].url) { keep.add(byId[b.soundId].url); preloadUrl(byId[b.soundId].url); }
     if (b.sayId && byId[b.sayId] && byId[b.sayId].url) { keep.add(byId[b.sayId].url); preloadUrl(byId[b.sayId].url); }
+    if (b.bgmId && byId[b.bgmId] && byId[b.bgmId].url) { keep.add(byId[b.bgmId].url); preloadUrl(byId[b.bgmId].url); }
+    for (const sid of [b.soundId, b.bgmId]) if (sid && isBuiltin(sid) && isStream(sid)) keep.add(builtinUrl(sid));
   }
   forgetUnused(keep);
-  preloadBuiltins([...new Set(P.upcoming.slice(0, 60).map(b => b.soundId))]);
+  preloadBuiltins([...new Set(P.upcoming.filter(b => b.at - n < 2 * 86400000).slice(0, 60).flatMap(b => [b.soundId, b.bgmId]).filter(Boolean))]);
   draw();
 }
 
@@ -279,6 +282,8 @@ function draw() {
       ${online ? '' : '<span class="pl-offline">인터넷 끊김 · 저장된 일정으로 울려요</span>'}
       ${checks.map(([ok, t]) => `<span class="row" style="gap:6px">${ck(ok)}${h(t)}</span>`).join('')}
       <span class="grow"></span>
+      <span class="small num" style="opacity:.7">v${h(APP_VERSION)}</span>
+      ${P.update && P.update.isNew ? `<button class="btn" data-pl="update" style="border-color:var(--brass);color:inherit">새 버전 ${h(P.update.latest)} 업데이트</button>` : ''}
       <button class="btn" data-pl="test">소리 시험</button>
       <button class="btn" data-pl="menu">설정</button>
     </div>`;
@@ -340,7 +345,7 @@ function openMenu() {
       <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow">
       <button class="btn" data-pl="voice-test">들어보기</button></div></div>
     <button class="btn block" data-pl="test">소리 시험</button>
-    <div class="tiny muted">벨키퍼 ${APP_VERSION} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중</div>
+    <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중</div>
     <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button>
     <button class="btn primary block" data-pl="close">닫기</button>
   </div>`;
@@ -357,6 +362,10 @@ document.addEventListener('click', async e => {
     speak('안녕하세요. 벨키퍼 안내 방송입니다.', 100, { uri, rate });
   }
   if (a === 'menu') openMenu();
+  if (a === 'update') {
+    if (!confirm('새 버전으로 업데이트할까요? 업데이트 뒤 [재생 시작]을 한 번 눌러 주세요.')) return;
+    return reloadToLatest();
+  }
   if (a === 'close') {
     const v = document.getElementById('pl-voice'), r = document.getElementById('pl-rate');
     if (v) setDeviceVoicePref(v.value, Number(r.value) || 1);
@@ -377,6 +386,7 @@ window.addEventListener('offline', draw);
 // ── 시작 ─────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
+watchUpdates(u => { P.update = u; draw(); }, 30 * 60 * 1000);
 setInterval(tick, 250);
 setInterval(() => { if (gate.classList.contains('hidden')) draw(); }, 1000);
 setInterval(heartbeat, HEARTBEAT_MS);

@@ -1,6 +1,6 @@
 // 벨키퍼 홈 화면 — 로그인·로그아웃, 종소리 들어보기
 import * as F from './fb.js';
-import { escapeHtml as h } from './core.js';
+import { escapeHtml as h, APP_VERSION } from './core.js';
 import { BUILTIN_SOUNDS, playBell, stopAll, unlockAudio } from './sounds.js';
 
 // 예전 공유 링크(index.html?share=…)는 관리자 화면으로 넘겨줌
@@ -8,7 +8,7 @@ const share = new URLSearchParams(location.search).get('share');
 if (share) location.replace('app.html?share=' + encodeURIComponent(share));
 
 const PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-const PICK = ['b:westminster', 'b:dingdong', 'b:airport', 'b:church', 'b:handbell', 'b:windchime', 'b:elise_box', 'b:brahms', 'b:joy', 'b:canon', 'b:phone', 'b:notify_bright', 'b:buzzer', 'b:bowl'];
+const PICK = ['b:westminster', 'b:dingdong', 'b:airport', 'b:church', 'b:handbell', 'b:windchime', 'b:elise_box', 'b:brahms', 'b:steel03', 'b:pizzi05', 'b:sax02', 'b:nes07', 'b:phone', 'b:bowl', 'b:bgm_lofi_tea', 'b:bgm_morning_sky'];
 const chips = document.getElementById('sound-chips');
 chips.innerHTML = PICK.map(id => BUILTIN_SOUNDS.find(s => s.id === id)).filter(Boolean)
   .map(s => `<button class="chip" data-sound="${s.id}">${PLAY}${h(s.name)}</button>`).join('')
@@ -61,5 +61,7 @@ document.addEventListener('click', async e => {
   }
 });
 
+const verEl = document.getElementById('ver');
+if (verEl) verEl.textContent = '버전 ' + APP_VERSION;
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 if (F.configured) F.onAuthStateChanged(F.auth, renderAccount);

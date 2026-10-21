@@ -7,8 +7,9 @@ import {
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById } from './templates.js';
 import { KR_HOLIDAYS } from './holidays.js';
+import { watchUpdates, checkUpdate, reloadToLatest, cmpVer } from './version.js';
 import {
-  BUILTIN_SOUNDS, SOUND_CATS, isBuiltin, builtinName, resolveBuiltin, playBell, stopAll, unlockAudio, fileDuration,
+  BUILTIN_SOUNDS, SOUND_CATS, BGM_MOODS, isBuiltin, builtinName, resolveBuiltin, playBell, stopAll, unlockAudio, fileDuration,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
 } from './sounds.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
@@ -25,6 +26,7 @@ const S = {
   timetables: [], rules: [], sounds: [], devices: [],
   tab: 'today', cal: null, unsub: [],
   invites: [],        // 나를 관리자로 초대한 공간
+  update: null,       // 새 버전 정보
   sheet: null,        // { type, ...데이터 }
   pair: null,         // { code, expiresAt }
   shareParam: new URLSearchParams(location.search).get('share')
@@ -107,6 +109,14 @@ function soundOptions(selected) {
   const missing = sel && sel !== 'none' && !isBuiltin(sel) && !ups.find(s => s.id === sel)
     ? `<option value="${h(sel)}" selected>(지워진 소리)</option>` : '';
   return `<option value="none" ${sel === 'none' ? 'selected' : ''}>소리 없음 (안내만)</option>${b}${u ? `<optgroup label="올린 소리">${u}</optgroup>` : ''}${missing}`;
+}
+function bgmOptions(selected) {
+  const sel = selected || '';
+  const g = BGM_MOODS.map(m => `<optgroup label="${h(m.label)}">${BUILTIN_SOUNDS.filter(s => s.cat === 'bgm' && s.mood === m.id)
+    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</optgroup>`).join('');
+  const ups = S.sounds.filter(s => s.kind !== 'tts');
+  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('');
+  return `<option value="" ${!sel ? 'selected' : ''}>배경음악 없음</option>${g}${u ? `<optgroup label="올린 소리·음악">${u}</optgroup>` : ''}`;
 }
 const ttsCfg = () => Object.assign({ mode: 'device', voice: DEFAULT_VOICE, rate: 1 }, (S.space && S.space.tts) || {});
 const googleOn = () => ttsCfg().mode === 'google' && ttsAvailable();
@@ -360,7 +370,7 @@ function render() {
         <button class="avatar-btn" data-act="account" aria-label="내 계정·로그아웃" title="${h(myEmail())}">${h((myName() || '?').slice(0, 1))}</button>
       </div>
     </header>
-    <main class="main">${S.ready ? views[S.tab]() : '<div class="muted center" style="padding:40px">불러오는 중…</div>'}</main>
+    <main class="main">${S.update && S.update.isNew ? `<div class="banner row between"><span><b>새 버전 ${h(S.update.latest)}</b>이 나왔어요. (지금 ${h(S.update.current)})</span><button class="btn primary" data-act="reload">새로 고침</button></div>` : ''}${S.ready ? views[S.tab]() : '<div class="muted center" style="padding:40px">불러오는 중…</div>'}</main>
   </div>`;
   window.scrollTo(0, scrollY);
   if (S.tab === 'devices' && S.pair) drawQr();
@@ -509,10 +519,18 @@ function viewSounds() {
 
   <div class="section-title"><h2>기본 종소리 ${BUILTIN_SOUNDS.length}종</h2><span class="tiny muted">무료 · 인터넷 없이도 울림</span></div>
   <div class="chips">${SOUND_CATS.map(c => `<button class="chip ${cat === c.id ? 'on' : ''}" data-act="sound-cat" data-id="${c.id}">${h(c.label)} ${BUILTIN_SOUNDS.filter(s => s.cat === c.id).length}</button>`).join('')}</div>
-  <div class="list">${BUILTIN_SOUNDS.filter(s => s.cat === cat).map(s => `<div class="item">
-    <div class="grow"><div style="font-weight:500">${h(s.name)}</div><div class="small muted">${h(s.desc)} · ${Math.round(s.sec)}초</div></div>
-    <button class="icon-btn soft" data-act="play-sound" data-id="${s.id}" aria-label="${h(s.name)} 듣기">${I.play}</button></div>`).join('')}</div>
+  ${cat === 'bgm' ? '<div class="small muted">종소리 대신 틀거나(최대 재생 시간으로 길이 조절), 안내 방송 뒤에 작게 깔 수 있어요.</div>' : ''}
+  ${(cat === 'bgm' ? BGM_MOODS.map(m => ({ label: m.label, items: BUILTIN_SOUNDS.filter(s => s.cat === 'bgm' && s.mood === m.id) }))
+    : [{ label: '', items: BUILTIN_SOUNDS.filter(s => s.cat === cat) }]).map(g => `${g.label ? `<div class="small bold brass" style="margin-top:6px">${h(g.label)}</div>` : ''}
+  <div class="list">${g.items.map(s => `<div class="item">
+    <div class="grow"><div style="font-weight:500">${h(s.name)}</div><div class="small muted">${h(s.desc)} · ${s.sec >= 60 ? `${Math.floor(s.sec / 60)}분 ${Math.round(s.sec % 60)}초` : `${Math.max(1, Math.round(s.sec))}초`}</div></div>
+    <button class="icon-btn soft" data-act="play-sound" data-id="${s.id}" aria-label="${h(s.name)} 듣기">${I.play}</button></div>`).join('')}</div>`).join('')}
   <button class="btn ghost" data-act="stop-all">재생 멈추기</button>
+  <details class="small muted"><summary>음원 출처</summary>
+    <p style="line-height:1.7">· 학교종·차임·종·멜로디·알림·경보·명상: 벨키퍼가 직접 합성한 소리<br>
+    · 징글·전자음: Kenney (kenney.nl) — CC0<br>
+    · 배경음악: OpenGameArt.org 작가 Joth, Tozan, cynicmusic, wipics, Centurion_of_war, haruta, Cakeflaps, Komiku, Pro Sensory, TAD, Yoiyami, Samza, Wolfgang_, nene, TinyWorlds, congusbongus, Zane Little Music, celestialghost8 — CC0<br>
+    모두 저작권 걱정 없이 무료로 쓸 수 있어요.</p></details>
 
   <div class="section-title"><h2>올린 소리·음악</h2><span class="tiny muted">${ups.length}개</span></div>
   <div class="list">
@@ -554,7 +572,9 @@ function viewDevices() {
   <div class="list">
     ${S.devices.map(d => {
       const on = deviceOnline(d);
-      const detail = on ? `${d.status === 'ready' ? '재생 중' : '재생 시작 버튼 대기'} · ${ago(millis(d.lastSeen))} 응답` : `${ago(millis(d.lastSeen))} 마지막 응답`;
+      const old = d.version && S.update && cmpVer(S.update.latest, d.version) > 0;
+      const detail = (on ? `${d.status === 'ready' ? '재생 중' : '재생 시작 버튼 대기'} · ${ago(millis(d.lastSeen))} 응답` : `${ago(millis(d.lastSeen))} 마지막 응답`)
+        + (d.version ? ` · v${d.version}${old ? ' (업데이트 필요)' : ''}` : '');
       return `<button class="item" data-act="device" data-id="${h(d.id)}"><span class="dot ${on ? 'ok' : 'off'}"></span>
         <div class="grow"><div style="font-weight:500">${h(d.name || '재생기')}</div><div class="small muted">${h(detail)}</div></div>
         <span class="small bold" style="color:${on ? 'var(--ok)' : 'var(--muted)'}">${on ? '정상' : '꺼짐'}</span></button>`;
@@ -694,7 +714,17 @@ function sheetAccount() {
     <a class="btn block" href="index.html">벨키퍼 홈으로</a>
     <a class="btn block" href="play.html">이 기기를 재생기로 쓰기</a>
     <button class="btn block danger" data-act="logout">로그아웃</button>
-    <div class="tiny muted center">벨키퍼 ${APP_VERSION}</div>`);
+    ${versionHtml()}`);
+}
+function versionHtml() {
+  const u = S.update;
+  const hist = (u && u.info && u.info.history) || [];
+  return `<div class="card stack tight">
+    <div class="row between"><div><span class="small muted">지금 버전</span> <b class="num">${h(APP_VERSION)}</b></div>
+      ${!u ? '<span class="small muted">확인 중…</span>' : u.isNew ? `<button class="btn primary" data-act="reload">${h(u.latest)}로 업데이트</button>` : '<span class="badge gold">최신 버전</span>'}</div>
+    ${hist.length ? `<details><summary class="small bold">업데이트 내역</summary>${hist.slice(0, 8).map(v => `<div class="small" style="margin-top:8px"><b class="num">${h(v.version)}</b> <span class="muted">${h(v.date || '')}</span>
+      <div class="muted" style="line-height:1.6">${(v.notes || []).map(n => '· ' + h(n)).join('<br>')}</div></div>`).join('')}</details>` : ''}
+  </div>`;
 }
 function sheetHolidays(sh) {
   const tk = todayKey(Date.now(), tz());
@@ -731,6 +761,7 @@ function sheetRing() {
       <button class="icon-btn soft" data-act="play-sound" data-id="${h(o.id)}" aria-label="이 기기에서 듣기">${I.play}</button>
       <button class="btn primary" data-act="ring-send" data-id="${h(o.id)}">울리기</button></div>`).join('')}</div>
     <label class="field"><span>안내 문구 (선택)</span><input class="input" id="ring-say" maxlength="120" placeholder="예: 전체 학생은 강당으로 모여주세요"></label>
+    <label class="field"><span>안내할 때 깔 배경음악 (선택)</span><select class="input" id="ring-bgm">${bgmOptions('')}</select></label>
     <button class="btn block" data-act="ring-stop">모든 재생기 소리 멈추기</button>`);
 }
 
@@ -816,6 +847,8 @@ function sheetTtEdit(sh) {
           <label class="field"><span>음량 ${b.volume}%</span><input type="range" min="10" max="100" step="5" data-b="${i}.volume" value="${b.volume}"></label>
           <label class="field"><span>최대 재생(초, 0=끝까지)</span><input class="input num" type="number" min="0" max="3600" data-b="${i}.maxSec" value="${b.maxSec || 0}"></label>
           <label class="field" style="grid-column:1 / -1"><span>안내 문구 (소리 뒤에 읽어줌)</span><input class="input" maxlength="120" data-b="${i}.say" placeholder="예: 점심시간입니다." value="${h(b.say || '')}"></label>
+          <label class="field" style="grid-column:1 / -1"><span>안내할 때 깔 배경음악</span><select class="input" data-b="${i}.bgmId">${bgmOptions(b.bgmId)}</select></label>
+          <label class="field" style="grid-column:1 / -1"><span>배경음악 크기 ${b.bgmVol == null ? 30 : b.bgmVol}%</span><input type="range" min="10" max="70" step="5" data-b="${i}.bgmVol" value="${b.bgmVol == null ? 30 : b.bgmVol}"></label>
         </div>` : ''}
       </div>`).join('')}
       <button class="btn dashed" data-act="tt-add-bell">+ 종 추가</button>
@@ -905,6 +938,7 @@ function sheetDevice(sh) {
       <div><span class="dot ${on ? 'ok' : 'off'}"></span> <b>${on ? '정상' : '응답 없음'}</b> · ${ago(millis(d.lastSeen))} 마지막 응답</div>
       ${d.nextLabel ? `<div class="muted">다음 종: ${h(d.nextLabel)}</div>` : ''}
       ${d.offsetMs != null ? `<div class="muted">기기 시계 오차: ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 (서버 시간으로 맞춰서 울려요)</div>` : ''}
+      ${d.version ? `<div class="muted">버전 ${h(d.version)}${S.update && cmpVer(S.update.latest, d.version) > 0 ? ` · <b style="color:var(--danger)">새 버전 ${h(S.update.latest)} 있음</b> — 재생기 화면의 [업데이트]를 눌러 주세요` : ''}</div>` : ''}
       ${d.ua ? `<div class="muted ellipsis">${h(d.ua)}</div>` : ''}
     </div>
     <label class="field"><span>이름</span><input class="input" id="dv-name" maxlength="30" value="${h(d.name || '')}"></label>
@@ -1097,7 +1131,7 @@ async function uploadSound() {
     });
 }
 
-function soundInUse(id) { return S.timetables.filter(t => (t.bells || []).some(b => b.soundId === id || b.sayId === id)); }
+function soundInUse(id) { return S.timetables.filter(t => (t.bells || []).some(b => b.soundId === id || b.sayId === id || b.bgmId === id)); }
 function ttInUse(id) { return S.rules.filter(r => r.ttId === id || Object.values(r.days || {}).includes(id)); }
 
 // 한곳에서 모든 클릭 처리
@@ -1144,7 +1178,8 @@ document.addEventListener('click', async e => {
         return toast('내보냈어요');
       }
       case 'holidays': return openSheet({ type: 'holidays', pick: {} });
-      case 'account': return openSheet({ type: 'account' });
+      case 'account': openSheet({ type: 'account' }); S.update = await checkUpdate(); if (S.sheet && S.sheet.type === 'account') renderSheet(); return;
+      case 'reload': return reloadToLatest();
       case 'sound-cat': S.soundCat = id; return render();
       case 'tts-settings': return openSheet({ type: 'tts', draft: { ...ttsCfg() } });
       case 'tts-mode': sh.draft.mode = id; return renderSheet();
@@ -1219,6 +1254,8 @@ document.addEventListener('click', async e => {
       case 'ring-send': {
         const say = ((document.getElementById('ring-say') || {}).value || '').trim().slice(0, 120);
         const cmd = { type: 'ring', soundId: id, say, label: '지금 울리기' };
+        const bgmId = (document.getElementById('ring-bgm') || {}).value || '';
+        if (say && bgmId) { cmd.bgmId = bgmId; cmd.bgmVol = 30; }
         if (say && googleOn()) {
           el.disabled = true; el.textContent = '음성 만드는 중…';
           try { const sid = await ensureTts(say); const snd = await F.getDoc(F.doc(sub('sounds'), sid)); if (snd.exists()) cmd.sayUrl = snd.get('url'); }
@@ -1377,8 +1414,9 @@ document.addEventListener('input', e => {
     const [i, f] = key.split('.');
     const b = sh.draft.bells[Number(i)];
     if (!b) return;
-    b[f] = (f === 'volume' || f === 'maxSec') ? Number(t.value) : t.value;
+    b[f] = (f === 'volume' || f === 'maxSec' || f === 'bgmVol') ? Number(t.value) : t.value;
     if (f === 'volume') { const lab = t.closest('label').querySelector('span'); if (lab) lab.textContent = `음량 ${t.value}%`; }
+    if (f === 'bgmVol') { const lab = t.closest('label').querySelector('span'); if (lab) lab.textContent = `배경음악 크기 ${t.value}%`; }
   }
   if (sh.type === 'tts' && t.dataset.t) {
     sh.draft[t.dataset.t] = t.dataset.t === 'rate' ? Number(t.value) : t.value;
@@ -1422,6 +1460,9 @@ window.addEventListener('focus', async () => {
 
 // ── 시작 ─────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+watchUpdates(u => { S.update = u; if (S.spaceId) render(); });
+checkUpdate().then(u => { S.update = u; });
 
 if (!F.configured) {
   renderNotConfigured();

@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.3.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -212,6 +212,11 @@ export function cleanBells(bells) {
       o.maxSec = Number.isFinite(ms) ? Math.min(3600, Math.max(0, Math.round(ms))) : 0;
       o.say = String(b.say || '').slice(0, 120);
       if (b.sayId && o.say) o.sayId = String(b.sayId).slice(0, 60);
+      if (b.bgmId && o.say) {
+        o.bgmId = String(b.bgmId).slice(0, 80);
+        const bv = Number(b.bgmVol);
+        o.bgmVol = Number.isFinite(bv) ? Math.min(100, Math.max(5, Math.round(bv))) : 30;
+      }
       return o;
     })
     .sort((a, b) => timeToSec(a.time) - timeToSec(b.time))
