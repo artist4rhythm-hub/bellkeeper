@@ -1,23 +1,25 @@
 // 벨키퍼 소리 재생
-// - 기본 종소리 43종: 벨키퍼가 직접 합성해 만든 소리라 저작권 걱정 없이 무료로 써요.
+// - 기본 종소리(수업 시작·끝 종, 학교종·차임 등): 벨키퍼가 직접 합성해 만든 소리라 저작권 걱정 없이 무료로 써요.
 //   멜로디는 저작권이 끝난 곡(공개 저작물)만 썼어요. 파일은 sounds/ 폴더에 있고, 인터넷이 끊겨도 울려요.
 // - 올린 소리·음악: 오디오 파일을 미리 불러 두었다가 재생
 // - 안내 문구: Google 고음질 음성으로 만든 파일, 또는 기기에 들어 있는 음성
 
 export const SOUND_CATS = [
-  { id: 'chime', label: '학교종·차임' },
-  { id: 'bell', label: '종' },
-  { id: 'melody', label: '멜로디' },
-  { id: 'ring', label: '알림·벨소리' },
-  { id: 'alert', label: '경보·작업장' },
-  { id: 'calm', label: '명상·쉼' },
-  { id: 'steel', label: '스틸드럼 징글' },
-  { id: 'pizzi', label: '피치카토 징글' },
-  { id: 'sax', label: '색소폰 징글' },
-  { id: 'nes', label: '8비트 징글' },
-  { id: 'hit', label: '효과 징글' },
-  { id: 'digital', label: '전자음' },
-  { id: 'bgm', label: '배경음악' }
+  { id: 'start', label: '수업 시작 종', group: 'school' },
+  { id: 'end', label: '수업 끝 종', group: 'school' },
+  { id: 'chime', label: '학교종·차임', group: 'school' },
+  { id: 'bell', label: '종', group: 'school' },
+  { id: 'melody', label: '멜로디', group: 'music' },
+  { id: 'ring', label: '알림·벨소리', group: 'music' },
+  { id: 'alert', label: '경보·작업장', group: 'music' },
+  { id: 'calm', label: '명상·쉼', group: 'music' },
+  { id: 'steel', label: '스틸드럼 징글', group: 'jingle' },
+  { id: 'pizzi', label: '피치카토 징글', group: 'jingle' },
+  { id: 'sax', label: '색소폰 징글', group: 'jingle' },
+  { id: 'nes', label: '8비트 징글', group: 'jingle' },
+  { id: 'hit', label: '효과 징글', group: 'jingle' },
+  { id: 'digital', label: '전자음', group: 'jingle' },
+  { id: 'bgm', label: '배경음악', group: 'bgm' }
 ];
 export const BGM_MOODS = [
   { id: 'piano', label: '잔잔한 피아노' }, { id: 'morning', label: '아침·밝게' }, { id: 'lofi', label: '로파이' },
@@ -25,6 +27,46 @@ export const BGM_MOODS = [
 ];
 
 export const BUILTIN_SOUNDS = [
+  { id: "b:st_west_echime", name: "웨스트민스터 (방송실 차임)", cat: 'start', desc: "학교 방송 차임 그대로 · 8음", sec: 9.4 },
+  { id: "b:st_west_piano", name: "웨스트민스터 (피아노)", cat: 'start', desc: "8음 · 부드럽게", sec: 8.9 },
+  { id: "b:st_west_box", name: "웨스트민스터 (오르골)", cat: 'start', desc: "8음 · 유치원·초등", sec: 6.4 },
+  { id: "b:st_west_marimba", name: "웨스트민스터 (마림바)", cat: 'start', desc: "8음 · 따뜻한 나무 소리", sec: 5.8 },
+  { id: "b:st_west_handbell", name: "웨스트민스터 (핸드벨)", cat: 'start', desc: "8음 · 교회 학교", sec: 8.7 },
+  { id: "b:st_west_celesta", name: "웨스트민스터 (첼레스타)", cat: 'start', desc: "8음 · 맑고 높게", sec: 6.8 },
+  { id: "b:st_tower8", name: "탑시계 8음 차임", cat: 'start', desc: "도시레라솔파미레도 하강 · 휘팅턴풍", sec: 10.6 },
+  { id: "b:st_tower_call", name: "탑시계 부름 차임", cat: 'start', desc: "미레도솔 · 도레미도", sec: 12.0 },
+  { id: "b:st_echime3", name: "띵동댕 (방송실 차임)", cat: 'start', desc: "올라가는 3음 · 방송 시작", sec: 6.3 },
+  { id: "b:st_echime4", name: "띵동댕동 (방송실 차임)", cat: 'start', desc: "올라가는 4음", sec: 6.8 },
+  { id: "b:st_handbell4", name: "핸드벨 도미솔도", cat: 'start', desc: "밝게 올라가는 4음", sec: 6.0 },
+  { id: "b:st_xylo", name: "실로폰 도레미파솔도", cat: 'start', desc: "어린이반 · 짧게", sec: 2.5 },
+  { id: "b:st_morning", name: "아침 기분 (그리그)", cat: 'start', desc: "페르 귄트 · 첼레스타 · 아침 첫 종", sec: 7.8 },
+  { id: "b:st_nacht", name: "아이네 클라이네 (모차르트)", cat: 'start', desc: "힘차게 시작 · 마림바", sec: 4.1 },
+  { id: "b:st_frere", name: "프레르 자크 (오르골)", cat: 'start', desc: "돌림노래 · 공개 저작물", sec: 7.4 },
+  { id: "b:st_arirang", name: "아리랑 (가야금풍)", cat: 'start', desc: "전래 민요 첫 소절", sec: 7.4 },
+  { id: "b:st_bugle", name: "나팔 신호 (시작)", cat: 'start', desc: "빰빰빰 빠- · 운동회·체육", sec: 3.2 },
+  { id: "b:st_harp_up", name: "하프 올라가기", cat: 'start', desc: "꿈결 같은 시작", sec: 4.0 },
+  { id: "b:st_piano_arp", name: "피아노 펼침화음 올라가기", cat: 'start', desc: "도솔도미솔도", sec: 5.3 },
+  { id: "b:st_ebell", name: "전기종 따르릉 (옛날 학교)", cat: 'start', desc: "3초 · 운동장까지 들리게", sec: 4.8 },
+  { id: "b:st_ebell_long", name: "전기종 길게", cat: 'start', desc: "6초 · 쉬는 시간 끝", sec: 7.8 },
+  { id: "b:st_school_bell", name: "학교 손종 땡땡땡", cat: 'start', desc: "선생님이 흔드는 종 · 4초", sec: 6.7 },
+  { id: "b:en_west_echime", name: "웨스트민스터 마침 (방송실 차임)", cat: 'end', desc: "솔레미도 · 도 · 차분하게", sec: 7.8 },
+  { id: "b:en_west_hour", name: "웨스트민스터 + 큰 종 세 번", cat: 'end', desc: "시계탑 정각처럼 · 하교", sec: 18.4 },
+  { id: "b:en_west_piano", name: "웨스트민스터 마침 (피아노)", cat: 'end', desc: "낮고 부드럽게", sec: 7.7 },
+  { id: "b:en_echime3", name: "댕동띵 (방송실 차임)", cat: 'end', desc: "내려가는 3음 · 방송 끝", sec: 6.3 },
+  { id: "b:en_echime4", name: "댕동띵동 (방송실 차임)", cat: 'end', desc: "내려가는 4음", sec: 6.6 },
+  { id: "b:en_handbell4", name: "핸드벨 도솔미도", cat: 'end', desc: "차분히 내려가는 4음", sec: 6.1 },
+  { id: "b:en_xylo", name: "실로폰 도솔파미레도", cat: 'end', desc: "어린이반 · 짧게", sec: 2.6 },
+  { id: "b:en_goinghome", name: "꿈속의 고향 (드보르자크)", cat: 'end', desc: "신세계 교향곡 2악장 · 하교 음악", sec: 7.2 },
+  { id: "b:en_auld", name: "석별의 정 (올드 랭 사인)", cat: 'end', desc: "스코틀랜드 민요 · 마치는 날", sec: 8.0 },
+  { id: "b:en_grace", name: "어메이징 그레이스 (핸드벨)", cat: 'end', desc: "찬송 ‘나 같은 죄인 살리신’ · 공개 저작물", sec: 11.2 },
+  { id: "b:en_amen", name: "아멘 (오르간)", cat: 'end', desc: "두 화음 · 예배·기도 마침", sec: 5.4 },
+  { id: "b:en_harp_down", name: "하프 내려가기", cat: 'end', desc: "부드럽게 마무리", sec: 4.9 },
+  { id: "b:en_piano_arp", name: "피아노 펼침화음 내려가기", cat: 'end', desc: "도솔미도솔도", sec: 5.5 },
+  { id: "b:en_bowl", name: "싱잉볼 마침", cat: 'end', desc: "길게 퍼지는 쉼 · 쉬는 시간 시작", sec: 10.8 },
+  { id: "b:en_ebell", name: "전기종 짧게", cat: 'end', desc: "1.5초 · 따르릉", sec: 3.3 },
+  { id: "b:en_school_bell", name: "학교 손종 두 번", cat: 'end', desc: "땡- 땡- · 조용히", sec: 4.5 },
+  { id: "b:en_bugle", name: "나팔 신호 (마침)", cat: 'end', desc: "빠- 빠빠 빠- · 체육 마침", sec: 3.1 },
+  { id: "b:en_gayageum", name: "가야금 마침", cat: 'end', desc: "레시라솔 미레솔 · 우리 가락", sec: 5.1 },
   { id: "b:westminster", name: "웨스트민스터 차임", cat: 'chime', desc: "딩동댕동 8음 · 학교종의 대표", sec: 12.1 },
   { id: "b:westminster4", name: "웨스트민스터 짧게", cat: 'chime', desc: "4음", sec: 9.8 },
   { id: "b:westminster16", name: "웨스트민스터 정시", cat: 'chime', desc: "시계탑 정시 멜로디 · 길게", sec: 19.1 },
@@ -409,7 +451,7 @@ let current = null;
 let bgCurrent = null;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// bell: { soundId, volume, maxSec, say, sayId }
+// bell: { soundId, volume, maxSec, repeat, say, sayId, sayRepeat, bgmId, bgmVol }
 // soundsById: { [id]: { url } } — 올린 소리·만든 안내 음성
 export function playBell(bell, soundsById = {}) {
   if (current) current.stop();
@@ -418,12 +460,17 @@ export function playBell(bell, soundsById = {}) {
   let inner = null;
   const run = (async () => {
     const id = bell.soundId || 'b:westminster';
+    const times = Math.max(1, Math.min(5, Math.round(Number(bell.repeat)) || 1));   // 종소리 반복 (1~5번)
     if (id !== 'none') {
-      if (isBuiltin(id)) inner = await playBuiltin(id, volume, bell.maxSec || 0);
-      else if (soundsById[id] && soundsById[id].url) inner = playUrl(soundsById[id].url, volume, bell.maxSec || 0);
-      else inner = await playBuiltin('b:westminster', volume);   // 파일을 찾을 수 없으면 기본 종으로
-      if (stopped) inner.stop();
-      await inner.finished;
+      for (let r = 0; r < times; r++) {
+        if (isBuiltin(id)) inner = await playBuiltin(id, volume, bell.maxSec || 0);
+        else if (soundsById[id] && soundsById[id].url) inner = playUrl(soundsById[id].url, volume, bell.maxSec || 0);
+        else inner = await playBuiltin('b:westminster', volume);   // 파일을 찾을 수 없으면 기본 종으로
+        if (stopped) inner.stop();
+        await inner.finished;
+        if (stopped) return;
+        if (r < times - 1) await wait(350);
+      }
     }
     if (stopped) return;
     const tts = bell.sayId && soundsById[bell.sayId];
@@ -437,11 +484,16 @@ export function playBell(bell, soundsById = {}) {
       await wait(1600);
       if (stopped) { bg.stop(); return; }
     }
-    if (tts && tts.url) {
-      inner = playUrl(tts.url, Math.min(100, volume + 10));
-      await inner.finished;
-    } else {
-      await speak(bell.say, volume);
+    const sayTimes = Math.max(1, Math.min(3, Math.round(Number(bell.sayRepeat)) || 1));   // 안내 반복 (1~3번)
+    for (let r = 0; r < sayTimes && !stopped; r++) {
+      if (r > 0) await wait(900);
+      if (stopped) break;
+      if (tts && tts.url) {
+        inner = playUrl(tts.url, Math.min(100, volume + 10));
+        await inner.finished;
+      } else {
+        await speak(bell.say, volume);
+      }
     }
     if (bg) {
       if (!stopped) await wait(1800);
