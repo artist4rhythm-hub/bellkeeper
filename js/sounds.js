@@ -266,12 +266,21 @@ export function isStream(id) { const s = builtinInfo(id); return !!(s && s.strea
 
 let ctx = null;
 let master = null;
+let analyserNode = null;
+export function getAnalyser() { return analyserNode; }
 export function audioCtx() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     ctx = new AC();
     master = ctx.createDynamicsCompressor();
-    master.connect(ctx.destination);
+    // 화면의 실시간 주파수 막대(RTA)용 분석기: 모든 소리가 여기를 지나가요
+    try {
+      analyserNode = ctx.createAnalyser();
+      analyserNode.fftSize = 8192;
+      analyserNode.smoothingTimeConstant = 0.55;
+      master.connect(analyserNode);
+      analyserNode.connect(ctx.destination);
+    } catch (e) { analyserNode = null; master.connect(ctx.destination); }
   }
   return ctx;
 }
@@ -310,6 +319,11 @@ async function playBuiltin(id, volume = 100, maxSec = 0) {
   if (c.state === 'suspended') { try { await c.resume(); } catch (e) { /* 무시 */ } }
   let buffer;
   try { buffer = await loadBuiltin(id); } catch (e) {
+    // 파일이 서버에 없으면(아직 안 올라감) 기본 종으로 대신 울림 — 조용히 넘어가지 않게
+    if (/sound 404/.test(String(e && e.message)) && resolveBuiltin(id) !== 'b:westminster') {
+      try { window.dispatchEvent(new CustomEvent('bk-sound-missing', { detail: { id, url: builtinUrl(id) } })); } catch (err) { /* 무시 */ }
+      return playBuiltin('b:westminster', volume, maxSec);
+    }
     // 소리 데이터를 못 풀면 파일을 그대로 재생
     return playUrl(builtinUrl(id), volume, maxSec, info.sprite ? info.start : 0, info.sprite ? info.dur : 0);
   }
@@ -346,11 +360,35 @@ async function playBuiltin(id, volume = 100, maxSec = 0) {
 // ── 오디오 파일 ─────────────────────────────────────
 const pool = new Map(); // url → HTMLAudioElement
 
+// 같은 주소(우리 사이트)의 파일, 또는 CORS가 열린 저장소 파일만 분석기에 연결할 수 있어요
+function sameOrigin(url) { try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; } }
+function corsOk(url) { try { return localStorage.getItem('bk.cors.' + new URL(url).origin) === '1'; } catch (e) { return false; } }
+export async function probeCors(url) {
+  // 올린 소리 하나로 저장소 CORS가 열렸는지 한 번 확인 (열려 있으면 안내 음성도 RTA에 보임)
+  try {
+    const o = new URL(url).origin;
+    if (o === location.origin) return;
+    const r = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    localStorage.setItem('bk.cors.' + o, r.ok ? '1' : '0');
+  } catch (e) { try { localStorage.setItem('bk.cors.' + new URL(url).origin, '0'); } catch (err) { /* 무시 */ } }
+}
+const routed = new WeakMap();
+function routeToAnalyser(a, url) {
+  try {
+    if (!ctx || routed.has(a)) return;
+    if (!sameOrigin(url) && !a.crossOrigin) return;
+    if (ctx.state !== 'running') return;
+    const src = ctx.createMediaElementSource(a);
+    src.connect(master);
+    routed.set(a, src);
+  } catch (e) { /* 무시 — 그냥 소리만 남 */ }
+}
 export function preloadUrl(url) {
   if (!url) return null;
   let a = pool.get(url);
   if (!a) {
     a = new Audio();
+    if (!sameOrigin(url) && corsOk(url)) a.crossOrigin = 'anonymous';
     a.preload = 'auto';
     a.src = url;
     try { a.load(); } catch (e) { /* 무시 */ }
@@ -364,6 +402,8 @@ export function forgetUnused(keepUrls) {
 
 function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}) {
   const a = preloadUrl(url);
+  if (ctx && routed.has(a) && ctx.state !== 'running') { try { ctx.resume(); } catch (e) { /* 무시 */ } }
+  routeToAnalyser(a, url);
   const base = Math.max(0, Math.min(1, volume / 100));
   if (clipDur > 0 && !maxSec) maxSec = clipDur + 0.3;
   let fadeTimer = null, stopTimer = null, stepTimer = null;
@@ -371,7 +411,17 @@ function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts =
   const finished = new Promise(r => { resolveEnd = r; });
   const end = () => { clearTimeout(fadeTimer); clearTimeout(stopTimer); clearInterval(stepTimer); resolveEnd(); };
   a.onended = end;
-  a.onerror = end;
+  a.onerror = () => {
+    // CORS 설정이 사라진 경우: 분석기 연결 없이 다시 재생
+    if (a.crossOrigin && !opts._retry) {
+      try { localStorage.setItem('bk.cors.' + new URL(url).origin, '0'); } catch (e) { /* 무시 */ }
+      pool.delete(url);
+      const r = playUrl(url, volume, maxSec, startAt, clipDur, { ...opts, _retry: true });
+      r.finished.then(end);
+      return;
+    }
+    end();
+  };
   a.loop = !!opts.loop;
   a.volume = opts.fadeIn ? 0.001 : base;
   try { a.currentTime = startAt || 0; } catch (e) { /* 무시 */ }
@@ -410,6 +460,8 @@ export function getDeviceVoicePref() {
 export function setDeviceVoicePref(uri, rate) {
   try { localStorage.setItem(LS_VOICE, uri || ''); localStorage.setItem(LS_RATE, String(rate || 1)); } catch (e) { /* 무시 */ }
 }
+let speaking = false;
+export function isSpeaking() { return speaking; }
 export function speak(text, volume = 100, opts = {}) {
   return new Promise(resolve => {
     if (!text || !('speechSynthesis' in window)) return resolve();
@@ -422,11 +474,13 @@ export function speak(text, volume = 100, opts = {}) {
       const vs = deviceVoices();
       const v = vs.find(x => x.voiceURI === (opts.uri || pref.uri)) || vs[0];
       if (v) u.voice = v;
-      u.onend = resolve; u.onerror = resolve;
+      speaking = true;
+      const done = () => { speaking = false; resolve(); };
+      u.onend = done; u.onerror = done;
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
-      setTimeout(resolve, 30000);
-    } catch (e) { resolve(); }
+      setTimeout(() => { speaking = false; resolve(); }, 30000);
+    } catch (e) { speaking = false; resolve(); }
   });
 }
 
@@ -448,6 +502,9 @@ export function audioReady() { return !!ctx && ctx.state === 'running'; }
 
 // ── 종 하나 재생 (소리 + 안내) ─────────────────────────
 let current = null;
+let playingCount = 0;
+export function isPlaying() { return playingCount > 0; }
+function emitPlay(on, label) { try { window.dispatchEvent(new CustomEvent('bk-play', { detail: { on, label } })); } catch (e) { /* 무시 */ } }
 let bgCurrent = null;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
@@ -511,7 +568,13 @@ export function playBell(bell, soundsById = {}) {
     }
   };
   current = ctl;
-  run.finally(() => { if (current === ctl) current = null; });
+  playingCount++;
+  emitPlay(true, bell.label || '');
+  run.finally(() => {
+    if (current === ctl) current = null;
+    playingCount = Math.max(0, playingCount - 1);
+    if (!playingCount) emitPlay(false, '');
+  });
   return ctl;
 }
 export function stopAll() { if (current) current.stop(); }

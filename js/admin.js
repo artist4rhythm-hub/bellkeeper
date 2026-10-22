@@ -10,8 +10,9 @@ import { KR_HOLIDAYS } from './holidays.js';
 import { watchUpdates, checkUpdate, reloadToLatest, cmpVer } from './version.js';
 import {
   BUILTIN_SOUNDS, SOUND_CATS, BGM_MOODS, isBuiltin, builtinName, resolveBuiltin, playBell, stopAll, unlockAudio, fileDuration,
-  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, builtinInfo, probeCors
 } from './sounds.js';
+import { createRTA } from './rta.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
@@ -102,12 +103,20 @@ async function copyText(t) {
   catch (e) { prompt('아래 내용을 복사하세요', t); }
 }
 
+function fmtSec(sec) {
+  sec = Number(sec) || 0;
+  if (!sec) return '';
+  if (sec < 60) return `${Math.max(1, Math.round(sec))}초`;
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return s ? `${m}분 ${s}초` : `${m}분`;
+}
+const withLen = (name, sec) => { const t = fmtSec(sec); return t ? `${name} · ${t}` : name; };
 function soundOptions(selected) {
   const sel = isBuiltin(selected) ? resolveBuiltin(selected) : selected;
   const b = SOUND_CATS.map(c => `<optgroup label="${h(c.label)}">${BUILTIN_SOUNDS.filter(s => s.cat === c.id)
-    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</optgroup>`).join('');
+    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(withLen(s.name, s.sec))}</option>`).join('')}</optgroup>`).join('');
   const ups = S.sounds.filter(s => s.kind !== 'tts');
-  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('');
+  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(withLen(s.name, s.duration))}</option>`).join('');
   const missing = sel && sel !== 'none' && !isBuiltin(sel) && !ups.find(s => s.id === sel)
     ? `<option value="${h(sel)}" selected>(지워진 소리)</option>` : '';
   return `<option value="none" ${sel === 'none' ? 'selected' : ''}>소리 없음 (안내만)</option>${b}${u ? `<optgroup label="올린 소리">${u}</optgroup>` : ''}${missing}`;
@@ -115,9 +124,9 @@ function soundOptions(selected) {
 function bgmOptions(selected) {
   const sel = selected || '';
   const g = BGM_MOODS.map(m => `<optgroup label="${h(m.label)}">${BUILTIN_SOUNDS.filter(s => s.cat === 'bgm' && s.mood === m.id)
-    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('')}</optgroup>`).join('');
+    .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${h(withLen(s.name, s.sec))}</option>`).join('')}</optgroup>`).join('');
   const ups = S.sounds.filter(s => s.kind !== 'tts');
-  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(s.name)}</option>`).join('');
+  const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(withLen(s.name, s.duration))}</option>`).join('');
   return `<option value="" ${!sel ? 'selected' : ''}>배경음악 없음</option>${g}${u ? `<optgroup label="올린 소리·음악">${u}</optgroup>` : ''}`;
 }
 const ttsCfg = () => Object.assign({ mode: 'device', voice: DEFAULT_VOICE, rate: 1 }, (S.space && S.space.tts) || {});
@@ -148,6 +157,23 @@ async function ensureTts(text) {
     kind: 'tts', ttsText: text, ttsVoice: c.voice, createdAt: F.serverTimestamp(), by: S.user.uid
   });
   return id;
+}
+// 미리 듣기: Google 안내 음성이면 지금 문구로 만들어서 들려줌
+async function bellForPreview(b) {
+  const bell = { ...b, label: b.label || b.time || '미리 듣기' };
+  delete bell.sayId; delete bell._open;
+  const map = soundsById();
+  const say = String(bell.say || '').trim();
+  if (say && googleOn()) {
+    try {
+      toast('안내 음성을 준비하고 있어요…');
+      const id = await ensureTts(say);
+      let s = S.sounds.find(x => x.id === id && x.url);
+      if (!s && id) { const snap = await F.getDoc(F.doc(sub('sounds'), id)); if (snap.exists()) s = { id, url: snap.get('url') }; }
+      if (s && s.url) { bell.sayId = id; map[id] = { url: s.url }; }
+    } catch (e) { ttsError(e); }
+  }
+  return { bell, map };
 }
 async function bellsWithTts(bells, onStep) {
   const out = [];
@@ -280,7 +306,9 @@ function openSpace(id) {
   S.unsub.push(F.onSnapshot(spaceRef(), d => { if (d.exists()) { S.space = { id: d.id, ...d.data() }; ensureMyAdminInfo(); render(); if (S.sheet && S.sheet.type === 'admins') renderSheet(); } }, onErr));
   S.unsub.push(F.onSnapshot(sub('timetables'), q => { S.timetables = q.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => millis(a.createdAt) - millis(b.createdAt)); S.ready = true; render(); }, onErr));
   S.unsub.push(F.onSnapshot(sub('rules'), q => { S.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, onErr));
-  S.unsub.push(F.onSnapshot(sub('sounds'), q => { S.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => millis(a.createdAt) - millis(b.createdAt)); render(); }, onErr));
+  S.unsub.push(F.onSnapshot(sub('sounds'), q => { S.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => millis(a.createdAt) - millis(b.createdAt)); render();
+    if (!S.corsProbed) { const f = S.sounds.find(s => s.url); if (f) { S.corsProbed = true; probeCors(f.url); } }
+  }, onErr));
   S.unsub.push(F.onSnapshot(sub('devices'), q => { S.devices = q.docs.map(d => ({ id: d.id, ...d.data() })); render(); }, onErr));
   render();
   if (S.shareParam) { const code = S.shareParam; S.shareParam = null; history.replaceState(null, '', location.pathname); openImport(code); }
@@ -686,10 +714,97 @@ async function newPairCode() {
 }
 
 // ── 시트 ─────────────────────────────────────
-function openSheet(sheet) { S.sheet = sheet; renderSheet(); }
+function openSheet(sheet) {
+  const prev = S.sheet;
+  if (prev && prev !== sheet && prev.type === 'tt-edit' && !prev.deleted && ttSig(prev.draft) !== prev.finalSig && ttTimesOk(prev.draft)) ttSave(prev, { final: true });
+  if (sheet.type === 'tt-edit') { sheet.savedSig = ttSig(sheet.draft); sheet.finalSig = sheet.savedSig; }
+  S.sheet = sheet; renderSheet();
+}
 // 저장이 끝났을 때, 그사이 사용자가 다른 창을 열었다면 그 창은 그대로 둠
 function closeIf(sh) { if (S.sheet === sh) closeSheet(); }
-function closeSheet() { S.sheet = null; renderSheet(); stopAll(); }
+function closeSheet() {
+  const sh = S.sheet;
+  // 일과표 편집 창은 닫을 때 마지막으로 저장 (안내 음성까지 만들어서)
+  if (sh && sh.type === 'tt-edit' && !sh.deleted && ttSig(sh.draft) !== sh.finalSig) {
+    if (!ttTimesOk(sh.draft)) {
+      if (!confirm('시각이 잘못된 종(빨간 칸)이 있어 마지막 고친 내용을 저장하지 못했어요.\n그래도 닫을까요?')) { renderSheet(); return; }
+    } else {
+      S.sheet = null; renderSheet(); stopAll();
+      ttSave(sh, { final: true }).then(ok => { if (ok) toast('저장했어요'); });
+      return;
+    }
+  }
+  S.sheet = null; renderSheet(); stopAll();
+}
+
+// ── 일과표 자동 저장 ─────────────────────────────
+// 고친 뒤 1.5초 동안 더 고치지 않으면 저장. 안내 음성(Google)은 닫거나 [저장하고 닫기] 때 만들어요.
+function ttSig(d) { return JSON.stringify([d.name || '', (d.bells || []).map(b => { const o = { ...b }; delete o._open; return o; })]); }
+function ttTimesOk(d) { return (d.bells || []).every(b => /^\d{2}:\d{2}$/.test(normTime(b.time) || '')); }
+function setAs(sh, state, text) {
+  sh.asState = state; sh.asText = text;
+  const el = document.getElementById('as-status');
+  if (el && S.sheet === sh) { el.className = 'as-status ' + state; el.textContent = text; }
+}
+async function ttSave(sh, { final = false } = {}) {
+  if (sh.deleted) return false;
+  if (sh.saving) { sh.again = (final || sh.again === 'final') ? 'final' : 'auto'; return sh.saving; }
+  const d = sh.draft;
+  if (!ttTimesOk(d)) { setAs(sh, 'warn', '시각이 잘못된 종이 있어 저장을 잠시 멈췄어요 (빨간 칸)'); return false; }
+  const sig = ttSig(d);
+  const name = (d.name || '').trim() || '이름 없는 일과표';
+  let bells = cleanBells(d.bells.map(b => ({ ...b, time: normTime(b.time) })));
+  const run = (async () => {
+    setAs(sh, 'busy', final ? '저장하는 중…' : '자동 저장 중…');
+    try {
+      if (googleOn() && bells.some(b => b.say)) {
+        if (final) {
+          try { bells = await bellsWithTts(bells, (i, n) => setAs(sh, 'busy', `안내 음성 만드는 중… ${i}/${n}`)); }
+          catch (e) { ttsError(e); bells = await bellsWithKnownTts(bells); }
+        } else bells = await bellsWithKnownTts(bells);
+      } else bells = bells.map(b => { const x = { ...b }; delete x.sayId; return x; });
+      if (sh.deleted) return false;
+      if (d.id) await F.updateDoc(F.doc(sub('timetables'), d.id), { name, bells, updatedAt: F.serverTimestamp() });
+      else {
+        const ref = await F.addDoc(sub('timetables'), { name, bells, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() });
+        d.id = ref.id;
+        if (S.sheet === sh) renderSheet();
+      }
+      sh.savedSig = sig;
+      if (final) sh.finalSig = sig;
+      const t = new Date();
+      setAs(sh, 'ok', `자동 저장됨 · ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`);
+      return true;
+    } catch (e) { setAs(sh, 'warn', '저장하지 못했어요. 인터넷 연결을 확인해 주세요'); fail(e); return false; }
+  })();
+  sh.saving = run;
+  const ok = await run;
+  sh.saving = null;
+  if (sh.again) { const f = sh.again === 'final'; sh.again = null; if (ttSig(sh.draft) !== (f ? sh.finalSig : sh.savedSig)) return ttSave(sh, { final: f }); }
+  return ok;
+}
+// 이미 만들어 둔 안내 음성만 연결 (자동 저장 때 새로 만들지 않음)
+async function bellsWithKnownTts(bells) {
+  const c = ttsCfg();
+  const out = [];
+  for (const b of bells) {
+    const nb = { ...b }; delete nb.sayId;
+    if (nb.say && googleOn()) {
+      const id = 'tts_' + await ttsKey(nb.say.trim().slice(0, 120), c.voice, c.rate);
+      if (S.sounds.find(s => s.id === id && s.url)) nb.sayId = id;
+    }
+    out.push(nb);
+  }
+  return out;
+}
+setInterval(() => {
+  const sh = S.sheet;
+  if (!sh || sh.type !== 'tt-edit' || sh.deleted || sh.saving) return;
+  const sig = ttSig(sh.draft);
+  if (sig === sh.savedSig) { sh.pendingSig = null; return; }
+  if (sig !== sh.pendingSig) { sh.pendingSig = sig; sh.changedAt = Date.now(); setAs(sh, 'edit', '고치는 중…'); return; }
+  if (Date.now() - sh.changedAt >= 1500) ttSave(sh);
+}, 500);
 function sheetFrame(title, body, opts = {}) {
   return `<div class="sheet-back" data-act="sheet-back"><div class="sheet ${opts.wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${h(title)}">
     <div class="sheet-head">${opts.back ? `<button class="icon-btn" data-act="${opts.back}" aria-label="뒤로">${I.left}</button>` : ''}<h3 class="grow">${h(title)}</h3>
@@ -925,9 +1040,9 @@ function fitToSpace(b) {
 }
 const selList = sh => [...(sh.sel || new Set())].filter(i => i < sh.draft.bells.length).sort((a, b) => a - b);
 
-function repOptions(v, max) {
+function repOptions(v, max, pre = '') {
   v = Number(v) || 1;
-  return Array.from({ length: max }, (_, k) => k + 1).map(n => `<option value="${n}" ${v === n ? 'selected' : ''}>${n === 1 ? '1번' : n + '번'}</option>`).join('');
+  return Array.from({ length: max }, (_, k) => k + 1).map(n => `<option value="${n}" ${v === n ? 'selected' : ''}>${pre}${n}번</option>`).join('');
 }
 // 순서 바꾸기: 종은 시각 순서로 울리므로 시각 칸은 제자리에 두고 내용(이름·소리·안내…)만 옮김
 function edReorder(sh, newOrder) {
@@ -1007,6 +1122,7 @@ function bulkPanel(sh) {
       <label class="field"><span>안내 문구</span><input class="input" id="bk-say" maxlength="120" placeholder="그대로"></label>
       <label class="field"><span>배경음악</span><select class="input" id="bk-bgm"><option value="__keep">그대로</option>${bgmOptions('__none__').replace('selected', '')}</select></label>
       <label class="field"><span>종소리 반복</span><select class="input" id="bk-rep"><option value="">그대로</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${n === 1 ? '1번 (반복 없음)' : n + '번'}</option>`).join('')}</select></label>
+      <label class="field"><span>안내 문구 반복</span><select class="input" id="bk-srep"><option value="">그대로</option>${[1, 2, 3].map(n => `<option value="${n}">${n === 1 ? '1번 (반복 없음)' : n + '번'}</option>`).join('')}</select></label>
       <label class="field"><span>최대 재생</span><select class="input" id="bk-max"><option value="">그대로</option><option value="0">끝까지</option>${[5, 10, 20, 30, 60, 120, 180].map(v => `<option value="${v}">${v}초</option>`).join('')}</select></label>
       <label class="field"><span>시각 옮기기 (분)</span><input class="input num" id="bk-shift" type="number" min="-180" max="180" step="1" value="0"></label>
     </div>
@@ -1074,15 +1190,16 @@ function sheetTtEdit(sh) {
       <select class="input be-sound" data-b="${i}.soundId" aria-label="소리">${soundOptions(b.soundId)}</select>
       <input class="input be-say" data-b="${i}.say" maxlength="120" placeholder="안내 문구 (선택)" value="${h(b.say || '')}" aria-label="안내 문구">
       <select class="input be-bgm" data-b="${i}.bgmId" aria-label="안내 배경음악">${bgmOptions(b.bgmId)}</select>
-      <select class="input be-rep" data-b="${i}.repeat" aria-label="종소리 반복">${repOptions(b.repeat, 5)}</select>
-      <input class="input be-vol num" type="number" min="10" max="100" step="5" data-b="${i}.volume" value="${b.volume == null ? 100 : b.volume}" aria-label="음량 %">
+      <select class="input be-rep" data-b="${i}.repeat" aria-label="종소리 반복" title="종소리 반복">${repOptions(b.repeat, 5, '종 ')}</select>
+      <select class="input be-srep" data-b="${i}.sayRepeat" aria-label="안내 문구 반복" title="안내 문구(배경음악) 반복">${repOptions(b.sayRepeat, 3, '안내 ')}</select>
       <div class="be-acts">
-        <button class="icon-btn sm soft" data-act="tt-preview" data-i="${i}" aria-label="미리 듣기">${I.play}</button>
+        <button class="icon-btn sm soft" data-act="tt-preview" data-i="${i}" aria-label="종소리와 안내 모두 미리 듣기" title="종소리 + 안내 미리 듣기">${I.play}</button>
         <button class="icon-btn sm ${b._open ? '' : 'soft'}" data-act="tt-more" data-i="${i}" aria-expanded="${b._open ? 'true' : 'false'}" aria-label="더보기">${I.dots}</button>
       </div>
       ${sum ? `<div class="be-sum">${h(sum)}</div>` : ''}
       ${b._open ? `<div class="be-more">
         <div class="acts">
+          <button class="btn sm gold" data-act="tt-say-preview" data-i="${i}" ${b.say ? '' : 'disabled'}>${I.play} 안내만 미리 듣기</button>
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로 옮기기">▲ 위로</button>
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="1" ${i === bells.length - 1 ? 'disabled' : ''} aria-label="아래로 옮기기">▼ 아래로</button>
           <button class="btn sm" data-act="ed-ins" data-i="${i}" data-pos="above">위에 종 넣기</button>
@@ -1095,9 +1212,9 @@ function sheetTtEdit(sh) {
         <div class="fields">
           <label class="field full phone-only"><span>안내 문구 (소리 뒤에 읽어줌)</span><input class="input" maxlength="120" data-b="${i}.say" placeholder="예: 점심시간입니다." value="${h(b.say || '')}"></label>
           <label class="field full phone-only bgm-field"><span>안내할 때 깔 배경음악</span><select class="input" data-b="${i}.bgmId">${bgmOptions(b.bgmId)}</select></label>
-          <label class="field phone-only"><span>음량 ${b.volume == null ? 100 : b.volume}%</span><input type="range" min="10" max="100" step="5" data-b="${i}.volume" value="${b.volume == null ? 100 : b.volume}"></label>
           <label class="field phone-only"><span>종소리 반복</span><select class="input" data-b="${i}.repeat">${repOptions(b.repeat, 5)}</select></label>
-          <label class="field"><span>안내 문구 반복</span><select class="input" data-b="${i}.sayRepeat">${repOptions(b.sayRepeat, 3)}</select></label>
+          <label class="field phone-only"><span>안내 문구(배경음악) 반복</span><select class="input" data-b="${i}.sayRepeat">${repOptions(b.sayRepeat, 3)}</select></label>
+          <label class="field"><span>음량 ${b.volume == null ? 100 : b.volume}%</span><input type="range" min="10" max="100" step="5" data-b="${i}.volume" value="${b.volume == null ? 100 : b.volume}"></label>
           <label class="field"><span>최대 재생 (초, 0=끝까지)</span><input class="input num" type="number" min="0" max="3600" data-b="${i}.maxSec" value="${b.maxSec || 0}"></label>
           <label class="field"><span>배경음악 크기 ${b.bgmVol == null ? 30 : b.bgmVol}%</span><input type="range" min="10" max="70" step="5" data-b="${i}.bgmVol" value="${b.bgmVol == null ? 30 : b.bgmVol}"></label>
         </div>
@@ -1109,14 +1226,15 @@ function sheetTtEdit(sh) {
       <label class="field grow" style="flex:1 1 260px"><span>일과표 이름</span><input class="input" data-b="name" maxlength="40" value="${h(d.name)}" style="font-size:17px;font-weight:700"></label>
       <div class="row wrap">
         ${d.id ? `<button class="btn" data-act="share-tt">공유</button><button class="btn" data-act="tt-copy">일과표 복제</button>` : ''}
-        <button class="btn primary" data-act="tt-save">저장</button>
+        <button class="btn primary" data-act="tt-save">저장하고 닫기</button>
       </div>
     </div>
+    <div class="as-line"><span class="as-status ${sh.asState || ''}" id="as-status">${h(sh.asText || '고치면 자동으로 저장돼요')}</span></div>
     ${edToolbar(sh)}
     ${sh.panel === 'bulk' && selList(sh).length ? bulkPanel(sh) : ''}
     ${sh.panel === 'repeat' ? repeatPanel(sh) : ''}
     <div class="stack tight">
-      <div class="ed-head"><span></span><span style="text-align:center">시각</span><span>이름</span><span>소리</span><span>안내 문구</span><span class="h-bgm">안내 배경음악</span><span>반복</span><span style="text-align:center">음량</span><span></span></div>
+      <div class="ed-head"><span></span><span style="text-align:center">시각</span><span>이름</span><span>소리 (길이)</span><span>안내 문구</span><span>종 반복</span><span>안내 반복</span><span></span></div>
       ${rows || '<div class="card muted center">종이 없어요. 아래에서 종을 추가하거나 [반복으로 만들기]를 눌러 보세요.</div>'}
     </div>
     <div class="row wrap">
@@ -1164,7 +1282,7 @@ function edApplySet(b, s) {
 function edBulkApply(sh) {
   const v = id => (document.getElementById(id) || {}).value;
   const sel = selList(sh);
-  const rp = v('bk-rep');
+  const rp = v('bk-rep'), srp = v('bk-srep');
   const sound = v('bk-sound'), vol = v('bk-vol'), say = (v('bk-say') || '').trim(), bgm = v('bk-bgm'), max = v('bk-max');
   const shift = Number(v('bk-shift')) || 0, clearSay = (document.getElementById('bk-clearsay') || {}).checked;
   sel.forEach(i => {
@@ -1172,6 +1290,7 @@ function edBulkApply(sh) {
     if (sound) b.soundId = sound;
     if (vol) b.volume = Number(vol);
     if (rp) b.repeat = Number(rp);
+    if (srp) b.sayRepeat = Number(srp);
     if (clearSay) { b.say = ''; delete b.sayId; } else if (say) { b.say = say; delete b.sayId; }
     if (bgm !== '__keep' && bgm != null) { if (bgm) { b.bgmId = bgm; if (b.bgmVol == null) b.bgmVol = 30; } else { delete b.bgmId; delete b.bgmVol; } }
     if (max !== '' && max != null) b.maxSec = Number(max);
@@ -1366,23 +1485,13 @@ function draftFrom(t) {
 }
 async function saveTimetable() {
   const sh = S.sheet;
-  const d = sh.draft;
-  const name = (d.name || '').trim() || '이름 없는 일과표';
-  d.bells.forEach(b => { const n = normTime(b.time); if (n) b.time = n; });
-  const bad = d.bells.find(b => !/^\d{2}:\d{2}$/.test(b.time || ''));
-  if (bad) { renderSheet(); toast('시각이 잘못된 종이 있어요 (빨간 칸). 0940처럼 넣어 주세요'); return; }
-  let bells = cleanBells(d.bells);
+  sh.draft.bells.forEach(b => { const n = normTime(b.time); if (n) b.time = n; });
+  if (!ttTimesOk(sh.draft)) { renderSheet(); toast('시각이 잘못된 종이 있어요 (빨간 칸). 0940처럼 넣어 주세요'); return; }
   const btn = sheetRoot.querySelector('[data-act="tt-save"]');
-  try {
-    if (googleOn() && bells.some(b => b.say)) {
-      if (btn) { btn.disabled = true; btn.textContent = '안내 음성 만드는 중…'; }
-      try { bells = await bellsWithTts(bells, (i, n) => { if (btn) btn.textContent = `안내 음성 만드는 중… ${i}/${n}`; }); }
-      catch (e) { ttsError(e); bells = bells.map(b => { const x = { ...b }; delete x.sayId; return x; }); }
-    }
-    if (d.id) await F.updateDoc(F.doc(sub('timetables'), d.id), { name, bells, updatedAt: F.serverTimestamp() });
-    else await F.addDoc(sub('timetables'), { name, bells, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() });
-    closeIf(sh); toast('저장했어요');
-  } catch (e) { fail(e); }
+  if (btn) btn.disabled = true;
+  const ok = await ttSave(sh, { final: true });
+  if (btn) btn.disabled = false;
+  if (ok) { closeIf(sh); toast('저장했어요'); }
 }
 
 async function saveRule() {
@@ -1657,7 +1766,14 @@ document.addEventListener('click', async e => {
       }
       case 'tt-del-bell': sh.draft.bells.splice(Number(el.dataset.i), 1); sh.sel = new Set(); return renderSheet();
       case 'tt-more': { const b = sh.draft.bells[Number(el.dataset.i)]; b._open = !b._open; return renderSheet(); }
-      case 'tt-preview': return playBell(sh.draft.bells[Number(el.dataset.i)], soundsById());
+      case 'tt-preview': case 'tt-say-preview': {
+        const b = sh.draft.bells[Number(el.dataset.i)];
+        if (act === 'tt-say-preview' && !b.say) return toast('안내 문구를 먼저 넣어 주세요');
+        stopAll();
+        const p = await bellForPreview(b);
+        if (act === 'tt-say-preview') p.bell.soundId = 'none';
+        return playBell(p.bell, p.map);
+      }
       case 'tt-shift': {
         const mins = Number(el.dataset.m);
         const sel = selList(sh);
@@ -1731,6 +1847,7 @@ document.addEventListener('click', async e => {
         const used = ttInUse(sh.draft.id);
         if (used.length) return alert(`이 일과표를 쓰는 규칙이 있어서 지울 수 없어요.\n\n${used.map(r => '· ' + ruleLabel(r)).join('\n')}\n\n달력에서 규칙을 먼저 바꿔주세요.`);
         if (!confirm('이 일과표를 지울까요?')) return;
+        sh.deleted = true;
         await F.deleteDoc(F.doc(sub('timetables'), sh.draft.id)); closeIf(sh); return toast('지웠어요');
       }
       case 'share-tt': {
@@ -1752,7 +1869,7 @@ document.addEventListener('click', async e => {
       }
 
       // 종소리
-      case 'play-sound': return playBell({ soundId: id, volume: 100 }, soundsById());
+      case 'play-sound': return playBell({ soundId: id, volume: 100, label: soundName(id) }, soundsById());
       case 'play-url': return playBell({ soundId: '__url', volume: 100 }, { __url: { url: el.dataset.url } });
       case 'stop-all': return stopAll();
       case 'upload': return openSheet({ type: 'upload' });
@@ -1971,3 +2088,39 @@ if (!F.configured) {
     openSpace(S.spaces.find(s => s.id === saved) ? saved : S.spaces[0].id);
   });
 }
+
+// ── 지금 재생 중 (실시간 주파수 막대 RTA) ─────────────────
+(() => {
+  const np = document.createElement('div');
+  np.className = 'np hidden';
+  np.setAttribute('role', 'status');
+  np.innerHTML = `<div class="np-top"><span class="np-dot"></span><div class="np-lab"><small>NOW PLAYING · RTA</small><span class="np-name"></span></div><button data-act="stop-all">멈추기</button></div><canvas aria-hidden="true"></canvas>`;
+  document.body.appendChild(np);
+  let rta = null, hideT = 0;
+  window.addEventListener('bk-play', e => {
+    if (e.detail.on) {
+      clearTimeout(hideT);
+      np.querySelector('.np-name').textContent = e.detail.label || '재생 중';
+      np.classList.remove('hidden');
+      if (!rta) rta = createRTA(np.querySelector('canvas'));
+      rta.start();
+    } else {
+      if (rta) rta.stop();
+      hideT = setTimeout(() => np.classList.add('hidden'), 1600);
+    }
+  });
+})();
+// 새 종소리 파일이 아직 서버(GitHub)에 없을 때 알려 줌
+const missingWarned = new Set();
+window.addEventListener('bk-sound-missing', e => {
+  const id = e.detail && e.detail.id;
+  if (missingWarned.has(id)) return;
+  missingWarned.add(id);
+  toast(`"${builtinName(id)}" 파일이 아직 서버에 없어서 웨스트민스터 차임으로 대신 울렸어요. GitHub에 sounds 폴더를 올렸는지 확인해 주세요`);
+});
+// 창 안에서 글자를 고르다가 바깥에서 손을 떼도 창이 닫히지 않게
+let downOnBack = false;
+document.addEventListener('mousedown', e => { downOnBack = !!(e.target.classList && e.target.classList.contains('sheet-back')); }, true);
+document.addEventListener('click', e => {
+  if (e.target.classList && e.target.classList.contains('sheet-back') && !downOnBack) { e.stopImmediatePropagation(); e.preventDefault(); }
+}, true);

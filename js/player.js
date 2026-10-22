@@ -5,8 +5,9 @@ import {
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
-  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
 } from './sounds.js';
+import { createRTA } from './rta.js';
 
 const el = document.getElementById('pl');
 const gate = document.getElementById('gate');
@@ -172,7 +173,10 @@ function startRunning() {
   }, onErr));
   P.unsub.push(F.onSnapshot(sub('timetables'), q => { P.timetables = q.docs.map(d => ({ id: d.id, ...d.data(), bells: cleanBells(d.data().bells) })); recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(sub('rules'), q => { P.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
-  P.unsub.push(F.onSnapshot(sub('sounds'), q => { P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
+  P.unsub.push(F.onSnapshot(sub('sounds'), q => {
+    P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
+    if (!P.corsProbed) { const f = P.sounds.find(s => s.url); if (f) { P.corsProbed = true; probeCors(f.url); } }
+  }, onErr));
   P.unsub.push(F.onSnapshot(F.query(sub('commands'), F.orderBy('createdAt', 'desc'), F.limit(10)), q => {
     if (P.seenCmd === null) P.seenCmd = new Set();
     // 오래된 것부터 순서대로 (최신 명령이 마지막에 남도록)
@@ -252,12 +256,16 @@ function showRinging(b) {
   overlay.classList.remove('hidden');
   overlay.innerHTML = `<svg class="ring-pulse" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
     <div class="lab">${h(b.label || '종')}</div>
+    <canvas class="pl-rta" aria-hidden="true"></canvas>
     <div style="font-size:20px;color:#C9D1CC">${h(b.time || '')} ${h(isBuiltin(b.soundId) ? builtinName(b.soundId) : ((soundsById()[b.soundId] || {}).name || ''))}</div>
     ${b.say ? `<div style="font-size:20px">"${h(b.say)}"</div>` : ''}
     <button class="btn lg" id="ring-stop" style="background:transparent;color:#F4F5F2;border-color:#3A4842">소리 멈추기</button>`;
   document.getElementById('ring-stop').onclick = () => { stopAll(); hideRinging(); };
+  if (P.rta) P.rta.kill();
+  P.rta = createRTA(overlay.querySelector('.pl-rta'));
+  P.rta.start();
 }
-function hideRinging() { overlay.classList.add('hidden'); overlay.innerHTML = ''; }
+function hideRinging() { if (P.rta) { P.rta.kill(); P.rta = null; } overlay.classList.add('hidden'); overlay.innerHTML = ''; }
 
 function tick() {
   if (!P.running || !P.space) return;
