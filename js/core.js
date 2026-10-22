@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.4.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -10,6 +10,15 @@ export const SPACE_TYPES = [
   { id: 'church', label: '교회·선교단체' },
   { id: 'etc', label: '기타' }
 ];
+
+export const PLAYER_STYLES = [
+  { id: 'light', name: 'A 시계형', desc: '밝은 화면에 큰 시계와 다음 종' },
+  { id: 'dark', name: 'B 카운트다운', desc: '어두운 화면, 남은 시간을 원으로' },
+  { id: 'board', name: 'C 일정판', desc: '오늘 종 전체 목록 · 교무실 TV용' },
+  { id: 'big', name: 'D 큰 시계', desc: '멀리서도 보이는 아주 큰 시계' },
+  { id: 'period', name: 'E 교시 진행', desc: '지금 교시와 남은 시간 막대' }
+];
+export function styleName(id) { const s = PLAYER_STYLES.find(x => x.id === id); return s ? s.name : PLAYER_STYLES[0].name; }
 
 export const DOW_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 

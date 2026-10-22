@@ -6,6 +6,7 @@ function t(min) { return `${pad(Math.floor(min / 60) % 24)}:${pad(min % 60)}`; }
 function m(hhmm) { const [h, mi] = hhmm.split(':').map(Number); return h * 60 + mi; }
 
 // 수업형 일과표 만들기
+export function makeLessons(args) { return lessons(args); }
 function lessons({ first, count, len, brk, lunchAfter = 0, lunchLen = 0, lunchLabel = '점심시간', lunchSay = '점심시간입니다.', prefix = '', startSound = 'b:westminster', endSound = 'b:dingdong', extra = [] }) {
   const bells = [];
   let cur = m(first);
