@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.8.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -21,8 +21,40 @@ export const PLAYER_STYLES = [
   { id: 'analog2', name: 'G 아날로그 일정', desc: '어두운 바탕 · 바늘 시계와 큰 요일' },
   { id: 'date', name: 'H 날짜 크게', desc: '요일·날짜를 아주 크게' },
   { id: 'flip', name: 'I 넘김 시계', desc: '숫자 카드가 넘어가는 시계' },
-  { id: 'minimal', name: 'J 화면 보호', desc: '검은 화면에 작은 시계가 떠다님' }
+  { id: 'minimal', name: 'J 화면 보호', desc: '검은 화면에 작은 시계가 떠다님' },
+  { id: 'analog3', name: 'K 큰 아날로그', desc: '화면 가득 바늘 시계 + 양옆 날짜·다음 종' }
 ];
+// 아날로그 시계판 디자인
+export const DIALS = [
+  { id: 'classic', name: '기본', desc: '숫자 1~12' },
+  { id: 'school', name: '교실 시계', desc: '분 숫자까지 · 빨간 초침' },
+  { id: 'roman', name: '로마 숫자', desc: 'I · II · III 클래식' },
+  { id: 'minimal', name: '미니멀', desc: '숫자 없이 막대만' },
+  { id: 'kids', name: '알록달록', desc: '시간마다 색 · 유치원' },
+  { id: 'gold', name: '골드', desc: '어두운 판에 금색' }
+];
+// 재생기 글씨체 (Google Fonts, 무료)
+export const FONTS = [
+  { id: 'noto', name: '기본 고딕', css: "'Noto Sans KR', sans-serif", g: '' },
+  { id: 'gowun', name: '고운돋움', css: "'Gowun Dodum', 'Noto Sans KR', sans-serif", g: 'Gowun+Dodum' },
+  { id: 'serif', name: '명조', css: "'Noto Serif KR', serif", g: 'Noto+Serif+KR:wght@400;700;900' },
+  { id: 'jua', name: '주아 (둥근)', css: "'Jua', 'Noto Sans KR', sans-serif", g: 'Jua' },
+  { id: 'dohyeon', name: '도현 (각진)', css: "'Do Hyeon', 'Noto Sans KR', sans-serif", g: 'Do+Hyeon' },
+  { id: 'blackhan', name: '검은고딕 (굵게)', css: "'Black Han Sans', 'Noto Sans KR', sans-serif", g: 'Black+Han+Sans' },
+  { id: 'gaegu', name: '개구 (손글씨)', css: "'Gaegu', 'Noto Sans KR', sans-serif", g: 'Gaegu:wght@400;700' },
+  { id: 'digital', name: '디지털 숫자', css: "'Orbitron', 'Noto Sans KR', sans-serif", g: 'Orbitron:wght@500;700;900' }
+];
+export function loadFont(id) {
+  const f = FONTS.find(x => x.id === id);
+  if (!f || !f.g || typeof document === 'undefined') return;
+  const key = 'bkfont-' + f.id;
+  if (document.getElementById(key)) return;
+  const l = document.createElement('link');
+  l.id = key; l.rel = 'stylesheet';
+  l.href = `https://fonts.googleapis.com/css2?family=${f.g}&display=swap`;
+  document.head.appendChild(l);
+}
+export function fontCss(id) { const f = FONTS.find(x => x.id === id); return f ? f.css : FONTS[0].css; }
 // 종 색 표시 (일과표에서 한눈에) — 직접 고르지 않으면 이름으로 자동
 export const BELL_COLORS = [
   { id: 'start', name: '수업 시작', c: '#2F8F5B', bg: '#E3F1E8' },

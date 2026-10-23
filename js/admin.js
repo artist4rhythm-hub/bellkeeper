@@ -3,7 +3,7 @@ import * as F from './fb.js';
 import {
   APP_VERSION, SPACE_TYPES, DOW_LABELS, RULE_KINDS, todayKey, koreanDate, shortDate, addDays, dowOfKey,
   parseKey, dateKey, resolveDay, bellsForDay, upcomingBells, sortRules, fmtRemain, fmtRemainWords,
-  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName, BELL_COLORS, bellColor, autoColorId
+  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName, BELL_COLORS, bellColor, autoColorId, DIALS, FONTS, loadFont
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById, makeLessons } from './templates.js';
 import { KR_HOLIDAYS } from './holidays.js';
@@ -826,6 +826,7 @@ function renderSheet() {
   sheetRoot.innerHTML = fn ? fn(sh) : '';
   renderSheet._type = sh.type;
   if (keep) { const nw = sheetRoot.querySelector('.sheet'); if (nw) nw.scrollTop = keep; }
+  if (sh.type === 'device') setTimeout(mountPv, 0);
   const first = sheetRoot.querySelector('[autofocus]');
   if (first) first.focus();
 }
@@ -1416,9 +1417,17 @@ function sheetDevice(sh) {
       <button class="btn danger" data-act="device-remove" data-id="${h(d.id)}" style="align-self:flex-start">연결 해제</button>
     </div>
     <div class="stack">
+      <div class="field"><div class="row between"><span class="bold small">미리 보기</span>
+        <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${(S.pvSize || 'tv') === k ? 'on' : ''}" data-act="pv-size" data-v="${k}">${t}</button>`).join('')}</div></div>
+        <div class="pv-box ${S.pvSize || 'tv'}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
+        <div class="tiny muted">버튼에 마우스를 올리면 그 모양으로 미리 보여요.</div></div>
       <div class="field"><span>화면 모양</span>
-        <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${cur === s.id ? 'on' : ''}" data-act="device-display" data-id="${h(d.id)}" data-v="${s.id}" aria-pressed="${cur === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
+        <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${cur === s.id ? 'on' : ''}" data-act="device-display" data-id="${h(d.id)}" data-v="${s.id}" data-pv="mode" aria-pressed="${cur === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
         <div class="tiny muted">누르면 재생기 화면이 몇 초 안에 바로 바뀌어요.</div></div>
+      <div class="field"><span>시계판 디자인 <span class="muted" style="font-weight:400">· F·G·K 아날로그 화면</span></span>
+        <div class="dial-grid">${DIALS.map(x => `<button class="${(d.dial || 'classic') === x.id ? 'on' : ''}" data-act="device-opt" data-k="dial" data-id="${h(d.id)}" data-v="${x.id}" data-pv="dial"><b>${h(x.name)}</b><span class="muted tiny">${h(x.desc)}</span></button>`).join('')}</div></div>
+      <div class="field"><span>글씨체</span>
+        <div class="font-grid">${FONTS.map(f => { loadFont(f.id); return `<button class="${(d.font || 'noto') === f.id ? 'on' : ''}" data-act="device-opt" data-k="font" data-id="${h(d.id)}" data-v="${f.id}" data-pv="font"><span class="fs" style="font-family:${f.css.replace(/"/g, "'")}">09:30 금요일</span><span class="muted tiny">${h(f.name)}</span></button>`; }).join('')}</div></div>
       <div class="field"><span>화면 보호 (모니터가 타지 않게)</span>
         <div class="chips wrap"><button class="chip ${saver === 'night' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="night">수업 없을 때 화면 보호</button>
           <button class="chip ${saver === 'off' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="off">항상 고른 화면</button></div>
@@ -1974,6 +1983,13 @@ document.addEventListener('click', async e => {
         if (!confirm('이 재생기를 새로 고칠까요? (새 버전이 있으면 업데이트돼요)')) return;
         await sendCommand({ type: 'reload', target: id }); return toast('새로 고침 신호를 보냈어요');
       }
+      case 'pv-size': S.pvSize = el.dataset.v; renderSheet(); return mountPv();
+      case 'device-opt': {
+        const patch = { [el.dataset.k]: el.dataset.v };
+        await F.updateDoc(F.doc(sub('devices'), id), patch);
+        const d = S.devices.find(x => x.id === id); if (d) Object.assign(d, patch);
+        S.pv = null; renderSheet(); mountPv(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
+      }
       case 'device-saver': case 'device-cycle': {
         const patch = act === 'device-saver' ? { saver: el.dataset.v } : { cycle: Number(el.dataset.v) };
         await F.updateDoc(F.doc(sub('devices'), id), patch);
@@ -2221,4 +2237,40 @@ document.addEventListener('change', async e => {
   if (e.target.id !== 'dv-vol') return;
   const id = e.target.dataset.id, vol = Number(e.target.value);
   try { await F.updateDoc(F.doc(sub('devices'), id), { vol }); const d = S.devices.find(x => x.id === id); if (d) d.vol = vol; toast(`재생기 음량을 ${vol}%로 바꿨어요`); } catch (err) { fail(err); }
+});
+
+// ── 재생기 미리 보기 (기기 창) ─────────────────────────
+const PV_SIZES = { tv: [1280, 720], tab: [1024, 768], phone: [390, 844] };
+let pvRO = null;
+function mountPv() {
+  const box = sheetRoot.querySelector('.pv-box'), fr = document.getElementById('pv-frame');
+  if (!box || !fr) return;
+  const [w, hh] = PV_SIZES[S.pvSize || 'tv'];
+  fr.style.width = w + 'px'; fr.style.height = hh + 'px';
+  const fit = () => { const s = box.clientWidth / w; fr.style.transform = `scale(${s})`; box.style.height = (hh * s) + 'px'; };
+  fit();
+  if (pvRO) pvRO.disconnect();
+  if (window.ResizeObserver) { pvRO = new ResizeObserver(fit); pvRO.observe(box); }
+}
+function pokePv() { const fr = document.getElementById('pv-frame'); try { fr && fr.contentWindow.postMessage('bk-pv', location.origin); } catch (e) { /* 무시 */ } }
+window.__bkPreviewState = () => {
+  const sh = S.sheet;
+  const d = sh && sh.type === 'device' ? S.devices.find(x => x.id === sh.id) : null;
+  if (!d || !S.space) return null;
+  const pv = S.pv || {};
+  return {
+    space: S.space, saved: { name: d.name || '재생기' }, timetables: S.timetables, rules: S.rules, sounds: S.sounds, offset: 0,
+    mode: pv.mode || d.display || d.mode || 'light',
+    opt: { font: pv.font || d.font || 'noto', dial: pv.dial || d.dial || 'classic', saver: 'off', cycle: 0, vol: d.vol || 100 }
+  };
+};
+document.addEventListener('mouseover', e => {
+  const b = e.target.closest && e.target.closest('[data-pv]');
+  if (!b || !S.sheet || S.sheet.type !== 'device') return;
+  S.pv = { [b.dataset.pv]: b.dataset.v }; pokePv();
+});
+document.addEventListener('mouseout', e => {
+  const b = e.target.closest && e.target.closest('[data-pv]');
+  if (!b || (e.relatedTarget && b.contains(e.relatedTarget))) return;
+  S.pv = null; pokePv();
 });

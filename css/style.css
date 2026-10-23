@@ -625,3 +625,77 @@ a.btn, a.btn:hover { text-decoration: none; }
   .pl-an2-right .md { font-size: 32px; } .pl-an2-right .dow { font-size: 40px; }
   .pl-an2-right .nxcard { padding: 12px 14px; }
 }
+
+/* ── 재생기 설정 화면 (전체 화면 · 미리 보기) ─────────── */
+.pl-gate.full { display: block; padding: 0; background: var(--ground); overflow: hidden; }
+.set-page { height: 100%; display: flex; flex-direction: column; }
+.set-head { display: flex; align-items: center; gap: 12px; padding: 12px clamp(12px, 3vw, 28px); background: var(--card); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.set-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.set-pv { padding: 14px clamp(12px, 3vw, 28px) 4px; display: flex; flex-direction: column; gap: 8px; }
+.set-main { padding: 12px clamp(12px, 3vw, 28px) 20px; display: grid; gap: 14px; align-content: start; }
+.set-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.set-card h4 { margin: 0; font-size: 16px; font-weight: 900; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.set-foot { display: none; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line); flex-shrink: 0; }
+.seg { display: inline-flex; background: var(--ground-2); border: 1px solid var(--line); border-radius: 10px; padding: 2px; }
+.seg button { border: 0; background: transparent; padding: 5px 10px; border-radius: 8px; font-size: 13px; color: var(--ink-2); }
+.seg button.on { background: var(--ink); color: var(--on-ink); }
+.pv-box { position: relative; width: 100%; overflow: hidden; border-radius: 14px; border: 1px solid var(--line); background: #000; box-shadow: 0 10px 30px rgba(23, 35, 31, 0.15); }
+.pv-box iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; }
+.pv-box.phone { max-width: 300px; margin: 0 auto; }
+.pv-box.tab { max-width: 640px; }
+.dial-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.dial-grid button, .font-grid button { border: 2px solid var(--line); background: var(--card); border-radius: 14px; padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; color: var(--ink); }
+.dial-grid button.on, .font-grid button.on { border-color: var(--ink); background: var(--ground-2); }
+.dial-mini { width: 72px; height: 72px; display: block; }
+.font-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.font-grid .fs { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.set-main .style-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+@media (max-width: 699px) {
+  .set-head .btn.gold { display: none; }
+  .set-foot { display: block; }
+  .set-head .btn:first-child { padding: 0 10px; }
+}
+@media (min-width: 1000px) {
+  .set-body { flex-direction: row; overflow: hidden; }
+  .set-pv { width: min(46vw, 640px); flex-shrink: 0; overflow-y: auto; padding-bottom: 20px; border-right: 1px solid var(--line); }
+  .set-main { flex: 1; overflow-y: auto; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .set-card.wide { grid-column: 1 / -1; }
+}
+body.preview { overflow: hidden; }
+body.preview .pl-gate, body.preview .pl-ringing { display: none !important; }
+
+/* 아날로그 시계판 */
+.an .mn { font: 600 6.2px system-ui, sans-serif; fill: #8A938F; text-anchor: middle; }
+.an .sh.red { stroke: #D0403A; } .an .sd.red { fill: #D0403A; }
+.an.d-school .nm { font-size: 17px; }
+.an.d-roman .nm, .an.d-gold .nm { font-family: 'Noto Serif KR', Georgia, serif; font-size: 13px; font-weight: 700; }
+.an.d-minimal .tk.big { stroke-width: 4.5; } .an.d-minimal .tk.quarter { stroke-width: 7; }
+.an.d-kids .face { fill: #FFFDF8; } .an.d-kids .rim { fill: #F6C48F; }
+.an.d-kids .nm { font-family: 'Jua', 'Noto Sans KR', sans-serif; font-size: 17px; }
+.an.d-kids .hh { stroke: #3C7DBF; stroke-width: 9; } .an.d-kids .mh { stroke: #C0567F; stroke-width: 6; }
+.an.d-kids .sh { stroke: #2F8F5B; } .an.d-kids .sd, .an.d-kids .cap { fill: #2F8F5B; }
+.an.d-gold .rim { fill: #B8913F; } .an.d-gold .face { fill: #14201B; }
+.an.d-gold .tk.big { stroke: #E0B25A; stroke-width: 3.5; } .an.d-gold .dotk { fill: #8C7A4E; }
+.an.d-gold .nm { fill: #E0B25A; } .an.d-gold .brand { fill: #8C7A4E; }
+.an.d-gold .hh, .an.d-gold .mh { stroke: #E9C77E; } .an.d-gold .sh { stroke: #F4F5F2; } .an.d-gold .sd, .an.d-gold .cap { fill: #F4F5F2; } .an.d-gold .cap2 { fill: #14201B; }
+
+/* K 큰 아날로그 */
+.pl.analog3 { background: var(--ground); color: var(--ink); }
+.pl-an3 { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 3vw; }
+.pl.analog3 .pl-face { width: min(66vh, 46vw); }
+
+.pl-an3 .an3-s { display: flex; flex-direction: column; gap: 1vh; min-width: 0; }
+.pl-an3 .an3-l { align-items: flex-end; text-align: right; }
+.pl-an3 .md { font-size: clamp(28px, 4.4vw, 70px); font-weight: 900; letter-spacing: -0.02em; line-height: 1; }
+.pl-an3 .dow { font-size: clamp(36px, 6vw, 96px); font-weight: 900; color: var(--brass-text); letter-spacing: -0.03em; line-height: 1; }
+.pl-an3 .yr { font-size: clamp(14px, 1.6vw, 20px); color: var(--muted); }
+.pl-an3 .nx { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: clamp(12px, 1.6vw, 20px); display: flex; flex-direction: column; gap: 2px; max-width: 340px; }
+.pl-an3 .nx .t { font-size: clamp(26px, 3.4vw, 46px); font-weight: 900; color: var(--brass-text); line-height: 1; }
+.pl-an3 .nx .l { font-size: clamp(16px, 2vw, 26px); font-weight: 700; }
+.mini.pv-analog3 { background: radial-gradient(circle at 50% 50%, #FFFDF8 0 17px, var(--ink) 17px 20px, var(--ground) 20px); border: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .pl-an3 { grid-template-columns: 1fr; justify-items: center; gap: 2vh; }
+  .pl-an3 .an3-l { align-items: center; text-align: center; }
+  .pl-an3 .an3-r { align-items: center; }
+  .pl.analog3 .pl-face { width: min(84vw, 44vh); order: -1; }
+}
