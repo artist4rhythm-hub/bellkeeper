@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.10.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -22,36 +22,80 @@ export const PLAYER_STYLES = [
   { id: 'date', name: 'H 날짜 크게', desc: '요일·날짜를 아주 크게' },
   { id: 'flip', name: 'I 넘김 시계', desc: '숫자 카드가 넘어가는 시계' },
   { id: 'minimal', name: 'J 화면 보호', desc: '검은 화면에 작은 시계가 떠다님' },
-  { id: 'analog3', name: 'K 큰 아날로그', desc: '화면 가득 바늘 시계 + 양옆 날짜·다음 종' }
+  { id: 'analog3', name: 'K 큰 아날로그', desc: '화면 가득 바늘 시계 + 양옆 날짜·다음 종' },
+  { id: 'ink', name: 'L 수묵화', desc: '흑백 수묵화 + 색 시계 · 8점' },
+  { id: 'digital', name: 'M 디지털', desc: 'LED·닉시관·LCD 등 8가지' },
+  { id: 'hangul', name: 'N 한글 시계', desc: '시각에 맞는 한글 글자가 켜짐' }
 ];
-// 아날로그 시계판 디자인
+// 아날로그 시계판 디자인 (그림은 faces.js)
 export const DIALS = [
   { id: 'classic', name: '기본', desc: '숫자 1~12' },
-  { id: 'school', name: '교실 시계', desc: '분 숫자까지 · 빨간 초침' },
-  { id: 'roman', name: '로마 숫자', desc: 'I · II · III 클래식' },
-  { id: 'minimal', name: '미니멀', desc: '숫자 없이 막대만' },
-  { id: 'kids', name: '알록달록', desc: '시간마다 색 · 유치원' },
-  { id: 'gold', name: '골드', desc: '어두운 판에 금색' }
+  { id: 'school', name: '교실 시계', desc: '분 숫자 · 빨간 초침' },
+  { id: 'roman', name: '로마 숫자', desc: 'I · II · III' },
+  { id: 'minimal', name: '미니멀', desc: '숫자 없이 막대' },
+  { id: 'railway', name: '기차역', desc: '굵은 막대 · 또렷하게' },
+  { id: 'antique', name: '앤티크', desc: '무늬 판 · 파란 바늘' },
+  { id: 'pocket', name: '회중시계', desc: '작은 초침판' },
+  { id: 'sector', name: '빈티지 섹터', desc: '두 겹 판' },
+  { id: 'h24', name: '24시 표시', desc: '13~24 함께' },
+  { id: 'navy', name: '네이비', desc: '남색 판 · 주황 초침' },
+  { id: 'gold', name: '골드', desc: '어두운 판에 금색' },
+  { id: 'marble', name: '대리석', desc: '흰 대리석 · 금색' },
+  { id: 'wood', name: '원목', desc: '나뭇결 · 놋쇠 바늘' },
+  { id: 'bauhaus', name: '바우하우스', desc: '원색 바늘' },
+  { id: 'neon', name: '네온', desc: '빛나는 선' },
+  { id: 'zodiac', name: '십이지', desc: '子丑寅卯 · 밤하늘' },
+  { id: 'obang', name: '오방색', desc: '청적황백흑 테두리' },
+  { id: 'chalk', name: '칠판', desc: '분필 글씨' },
+  { id: 'kids', name: '알록달록', desc: '시간마다 색' },
+  { id: 'glass', name: '유리', desc: '배경이 비침' }
 ];
-// 재생기 글씨체 (Google Fonts, 무료)
+// 아날로그 화면 배경 (F·K)
+export const ABGS = [
+  { id: 'plain', name: '기본' }, { id: 'kraft', name: '크라프트 종이' }, { id: 'wood', name: '원목 책상' }, { id: 'chalk', name: '칠판' },
+  { id: 'dawn', name: '새벽 노을' }, { id: 'night', name: '밤하늘' }, { id: 'forest', name: '숲 그늘' }
+];
+export const INK_ARTS = [{ id: 'auto', name: '30분마다 바꾸기' }, { id: 'mountain', name: '산수' }, { id: 'bamboo', name: '대나무' }, { id: 'plum', name: '매화' }, { id: 'orchid', name: '난초' }, { id: 'pine', name: '소나무' }, { id: 'waterfall', name: '폭포' }, { id: 'reed', name: '달밤 갈대' }, { id: 'boat', name: '강 위 쪽배' }];
+export const DIGIS = ['led', 'vfd', 'lcd', 'nixie', 'dot', 'thin', 'block', 'ring'];
+export const HGS = ['gold', 'ink', 'tile', 'sentence'];
+// 재생기 글씨체 (모두 무료 · 상업적 사용 가능)
+const FA = n => `https://cdn.jsdelivr.net/gh/fonts-archive/${n}/subsets/${n}-dynamic-subset.css`;
 export const FONTS = [
   { id: 'noto', name: '기본 고딕', css: "'Noto Sans KR', sans-serif", g: '' },
+  { id: 'pretendard', name: '프리텐다드', css: "'Pretendard', 'Noto Sans KR', sans-serif", href: FA('Pretendard') },
+  { id: 'gmarket', name: 'G마켓 산스', css: "'Gmarket Sans', 'Noto Sans KR', sans-serif", href: FA('GmarketSans') },
+  { id: 'paperlogy', name: '페이퍼로지', css: "'Paperlogy', 'Noto Sans KR', sans-serif", href: FA('Paperlogy') },
+  { id: 'nanumround', name: '나눔스퀘어 라운드', css: "'Nanum Square Round', 'Noto Sans KR', sans-serif", href: FA('NanumSquareRound') },
+  { id: 'maruburi', name: '마루부리', css: "'Maru Buri', 'Noto Serif KR', serif", href: FA('MaruBuri') },
+  { id: 'ridibatang', name: '리디바탕', css: "'RIDI Batang', 'Noto Serif KR', serif", href: FA('RIDIBatang') },
+  { id: 'serif', name: '본명조', css: "'Noto Serif KR', serif", g: 'Noto+Serif+KR:wght@400;700;900' },
+  { id: 'hahmlet', name: '함렛', css: "'Hahmlet', 'Noto Serif KR', serif", g: 'Hahmlet:wght@300;500;700;900' },
+  { id: 'gowunbatang', name: '고운바탕', css: "'Gowun Batang', 'Noto Serif KR', serif", g: 'Gowun+Batang:wght@400;700' },
+  { id: 'songmyung', name: '송명', css: "'Song Myung', 'Noto Serif KR', serif", g: 'Song+Myung' },
   { id: 'gowun', name: '고운돋움', css: "'Gowun Dodum', 'Noto Sans KR', sans-serif", g: 'Gowun+Dodum' },
-  { id: 'serif', name: '명조', css: "'Noto Serif KR', serif", g: 'Noto+Serif+KR:wght@400;700;900' },
+  { id: 'c24danjung', name: '카페24 단정해', css: "'Cafe24 Danjunghae', 'Noto Sans KR', sans-serif", href: FA('Cafe24Danjunghae') },
+  { id: 'c24simple', name: '카페24 심플해', css: "'Cafe24 Simplehae', 'Noto Sans KR', sans-serif", href: FA('Cafe24Simplehae') },
+  { id: 'c24surround', name: '카페24 써라운드', css: "'Cafe24 Ssurround', 'Noto Sans KR', sans-serif", href: FA('Cafe24Ssurround') },
+  { id: 'c24ohsquare', name: '카페24 오스퀘어', css: "'Cafe24 Ohsquare', 'Noto Sans KR', sans-serif", href: FA('Cafe24Ohsquare') },
+  { id: 'c24night', name: '카페24 고운밤', css: "'Cafe24 Oneprettynight', 'Noto Sans KR', sans-serif", href: FA('Cafe24Oneprettynight') },
+  { id: 'c24dongdong', name: '카페24 동동', css: "'Cafe24 Dongdong', 'Noto Sans KR', sans-serif", href: FA('Cafe24Dongdong') },
+  { id: 'c24moya', name: '카페24 모야모야', css: "'Cafe24 Moyamoya', 'Noto Sans KR', sans-serif", href: FA('Cafe24Moyamoya') },
   { id: 'jua', name: '주아 (둥근)', css: "'Jua', 'Noto Sans KR', sans-serif", g: 'Jua' },
   { id: 'dohyeon', name: '도현 (각진)', css: "'Do Hyeon', 'Noto Sans KR', sans-serif", g: 'Do+Hyeon' },
   { id: 'blackhan', name: '검은고딕 (굵게)', css: "'Black Han Sans', 'Noto Sans KR', sans-serif", g: 'Black+Han+Sans' },
+  { id: 'brush', name: '나눔붓글씨', css: "'Nanum Brush Script', 'Noto Serif KR', serif", g: 'Nanum+Brush+Script' },
+  { id: 'dokdo', name: '동해독도 (붓)', css: "'East Sea Dokdo', 'Noto Serif KR', serif", g: 'East+Sea+Dokdo' },
   { id: 'gaegu', name: '개구 (손글씨)', css: "'Gaegu', 'Noto Sans KR', sans-serif", g: 'Gaegu:wght@400;700' },
   { id: 'digital', name: '디지털 숫자', css: "'Orbitron', 'Noto Sans KR', sans-serif", g: 'Orbitron:wght@500;700;900' }
 ];
 export function loadFont(id) {
   const f = FONTS.find(x => x.id === id);
-  if (!f || !f.g || typeof document === 'undefined') return;
+  if (!f || !(f.g || f.href) || typeof document === 'undefined') return;
   const key = 'bkfont-' + f.id;
   if (document.getElementById(key)) return;
   const l = document.createElement('link');
   l.id = key; l.rel = 'stylesheet';
-  l.href = `https://fonts.googleapis.com/css2?family=${f.g}&display=swap`;
+  l.href = f.href || `https://fonts.googleapis.com/css2?family=${f.g}&display=swap`;
   document.head.appendChild(l);
 }
 export function fontCss(id) { const f = FONTS.find(x => x.id === id); return f ? f.css : FONTS[0].css; }
@@ -175,6 +219,8 @@ export function sortRules(rules) {
     const ra = (RULE_KINDS[a.kind] || { rank: 9 }).rank;
     const rb = (RULE_KINDS[b.kind] || { rank: 9 }).rank;
     if (ra !== rb) return ra - rb;
+    const ta = ruleTargets(a).length ? 0 : 1, tb = ruleTargets(b).length ? 0 : 1;   // 그룹 지정 규칙이 먼저
+    if (ta !== tb) return ta - tb;
     return ruleMillis(b) - ruleMillis(a);
   });
 }
@@ -184,25 +230,59 @@ function ruleCovers(r, key) {
   return r.start && r.end && r.start <= key && key <= r.end;
 }
 
+// ── 재생 그룹 ─────────────────────────────────
+// 그룹이 없는 재생기 = '공통'(BASE_GROUP). 규칙의 groups 가 비어 있으면 모든 그룹에 적용.
+export const BASE_GROUP = '_base';
+export const GROUP_COLORS = ['#2B7A8C', '#7A4E9A', '#3E7A4F', '#C0742A', '#B23A48', '#3D5A99', '#8A6D1E', '#5B6B66'];
+export function ruleTargets(r) { return Array.isArray(r && r.groups) ? r.groups.filter(Boolean) : []; }
+export function ruleApplies(r, gid) {
+  const t = ruleTargets(r);
+  return !t.length || t.includes(gid || BASE_GROUP);
+}
+// 재생기(또는 그룹 id)에 맞는 일정 기준 만들기
+export function schedCtx(gid, groups) {
+  const g = gid && gid !== BASE_GROUP ? (groups || []).find(x => x.id === gid) || null : null;
+  return { group: g ? g.id : BASE_GROUP, groupDoc: g };
+}
+
 // 날짜 하나에 어떤 일과표가 적용되는지
-// 반환: { rule, ttId }  (ttId가 ''이면 종 없음, rule이 null이면 규칙 없음)
-export function resolveDay(key, rules) {
+// 반환: { rule, ttId, src }  (ttId가 ''이면 종 없음, rule이 null이면 규칙 없음)
+// src: 'day' | 'week' | 'group' | 'period' | ''
+// 순서: 특정일(그룹 지정 → 전체) → 특정 주간·행사(그룹 지정 → 전체) → 그룹 요일 설정 → 기간(공통)
+export function resolveDay(key, rules, ctx) {
   const dow = dowOfKey(key);
-  for (const r of sortRules(rules)) {
+  const gid = (ctx && ctx.group) || BASE_GROUP;
+  const gdoc = ctx && ctx.groupDoc;
+  const list = sortRules((rules || []).filter(r => ruleApplies(r, gid)));
+  let groupDone = false;
+  for (const r of list) {
+    if (!groupDone && r.kind === 'period') {
+      groupDone = true;
+      const g = groupDay(gdoc, dow);
+      if (g) return g;
+    }
     if (!ruleCovers(r, key)) continue;
-    if (r.kind === 'day') return { rule: r, ttId: r.ttId || '' };
+    if (r.kind === 'day') return { rule: r, ttId: r.ttId || '', src: 'day' };
     const days = r.days || {};
     const v = days[String(dow)];
-    // 특정 주간에서 비워 둔 요일은 아래 규칙(기간)을 따름
+    // 특정 주간에서 비워 둔 요일은 아래 규칙(그룹·기간)을 따름
     if (r.kind === 'week' && (v === undefined || v === null || v === '_inherit')) continue;
-    return { rule: r, ttId: v || '' };
+    if (r.kind === 'period' && ruleTargets(r).length && (v === undefined || v === null || v === '_inherit')) continue;
+    return { rule: r, ttId: v || '', src: r.kind };
   }
-  return { rule: null, ttId: '' };
+  if (!groupDone) { const g = groupDay(gdoc, dow); if (g) return g; }
+  return { rule: null, ttId: '', src: '' };
+}
+function groupDay(gdoc, dow) {
+  if (!gdoc || !gdoc.days) return null;
+  const v = gdoc.days[String(dow)];
+  if (v === undefined || v === null || v === '_inherit') return null;
+  return { rule: { kind: 'group', id: 'group:' + gdoc.id, name: gdoc.name }, ttId: v || '', src: 'group' };
 }
 
 // 날짜 하나의 종 목록 (시각순, ms 포함)
-export function bellsForDay(key, rules, timetables, tz) {
-  const res = resolveDay(key, rules);
+export function bellsForDay(key, rules, timetables, tz, ctx) {
+  const res = resolveDay(key, rules, ctx);
   const tt = res.ttId ? timetables.find(t => t.id === res.ttId) : null;
   const { y, m, d } = parseKey(key);
   const bells = (tt && Array.isArray(tt.bells) ? tt.bells : [])
@@ -217,12 +297,12 @@ export function bellsForDay(key, rules, timetables, tz) {
 }
 
 // 지금 이후 다음 종들 (오늘 + 앞으로 n일)
-export function upcomingBells(nowMs, rules, timetables, tz, days = 7) {
+export function upcomingBells(nowMs, rules, timetables, tz, days = 7, ctx) {
   const start = todayKey(nowMs, tz);
   const out = [];
   for (let i = 0; i < days; i++) {
     const key = addDays(start, i);
-    const day = bellsForDay(key, rules, timetables, tz);
+    const day = bellsForDay(key, rules, timetables, tz, ctx);
     for (const b of day.bells) if (b.at > nowMs) out.push({ ...b, dateKey: key });
   }
   return out;

@@ -1,7 +1,8 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss } from './core.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, HGS } from './core.js';
+import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
@@ -14,9 +15,9 @@ const gate = document.getElementById('gate');
 const overlay = document.getElementById('ringing');
 const LS_KEY = 'bk.player';
 const LS_MODE = 'bk.player.mode';
-const MODES = ['light', 'dark', 'board', 'big', 'period', 'analog', 'analog2', 'analog3', 'date', 'flip', 'minimal'];
+const MODES = ['light', 'dark', 'board', 'big', 'period', 'analog', 'analog2', 'analog3', 'date', 'flip', 'minimal', 'ink', 'digital', 'hangul'];
 const PREVIEW = new URLSearchParams(location.search).has('preview');
-const DARK_MODES = ['dark', 'big', 'analog2', 'flip', 'minimal'];
+const DARK_MODES = ['dark', 'big', 'analog2', 'flip', 'minimal', 'digital'];
 const LS_OPT = 'bk.player.opt';
 function validMode(v) { return MODES.includes(v) ? v : 'light'; }
 const LS_FIRED = 'bk.player.fired';
@@ -25,17 +26,19 @@ const HEARTBEAT_MS = 60000;
 const OFFSET_EVERY = 15 * 60000;
 
 const P = {
-  uid: null, saved: null, space: null, timetables: [], rules: [], sounds: [],
+  uid: null, saved: null, space: null, timetables: [], rules: [], sounds: [], groups: [], group: '', logSince: '', devLoaded: false,
   offset: 0, offsetOk: false, running: false, unsub: [], seenCmd: null,
   mode: validMode(localStorage.getItem(LS_MODE)),
   upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null,
   // 화면 보호·음량·잠금 (관리자가 원격으로 바꾸면 그대로 따름)
-  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
+  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
   locked: false, pinHash: '', unlockedUntil: 0, seen: {}
 };
 function saveOpt() { if (PREVIEW) return; try { localStorage.setItem(LS_OPT, JSON.stringify(P.opt)); } catch (e) { /* 무시 */ } }
 const now = () => Date.now() + P.offset;
 const tz = () => (P.space && P.space.timezone) || 'Asia/Seoul';
+// 이 재생기가 속한 재생 그룹 기준으로 일정 계산
+const ctx = () => schedCtx(P.group, P.groups);
 const soundsById = () => Object.fromEntries(P.sounds.map(s => [s.id, s]));
 const myDoc = () => F.doc(F.db, 'spaces', P.saved.spaceId, 'devices', P.uid);
 const sub = n => F.collection(F.db, 'spaces', P.saved.spaceId, n);
@@ -182,8 +185,14 @@ function startRunning() {
     if (changed('cycle') && [0, 15, 30, 60].includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
     if (changed('font') && FONTS.some(f => f.id === x.font)) { P.opt.font = x.font; redraw = true; }
     if (changed('dial') && DIALS.some(f => f.id === x.dial)) { P.opt.dial = x.dial; redraw = true; }
+    if (changed('abg') && ABGS.some(f => f.id === x.abg)) { P.opt.abg = x.abg; redraw = true; }
+    if (changed('art') && INK_ARTS.some(f => f.id === x.art)) { P.opt.art = x.art; redraw = true; }
+    if (changed('digi') && DIGIS.includes(x.digi)) { P.opt.digi = x.digi; redraw = true; }
+    if (changed('hg') && HGS.includes(x.hg)) { P.opt.hg = x.hg; redraw = true; }
     if (changed('vol') && Number.isFinite(x.vol)) { P.opt.vol = Math.max(10, Math.min(100, x.vol)); }
     saveOpt();
+    P.logSince = x.logSince || ''; P.devLoaded = true;
+    if ((x.group || '') !== (P.group || '')) { P.group = x.group || ''; recompute(); }
     const lockNow = !!x.locked && !!x.pinHash;
     if (lockNow !== P.locked || (x.pinHash || '') !== P.pinHash) { P.locked = lockNow; P.pinHash = x.pinHash || ''; P.unlockedUntil = 0; redraw = true; if (!P.locked && gate.dataset.kind === 'pin') gate.classList.add('hidden'); }
     if (redraw) draw();
@@ -193,6 +202,7 @@ function startRunning() {
   }, onErr));
   P.unsub.push(F.onSnapshot(sub('timetables'), q => { P.timetables = q.docs.map(d => ({ id: d.id, ...d.data(), bells: cleanBells(d.data().bells) })); recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(sub('rules'), q => { P.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
+  P.unsub.push(F.onSnapshot(sub('groups'), q => { P.groups = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, e => console.warn(e)));
   P.unsub.push(F.onSnapshot(sub('sounds'), q => {
     P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
     if (!P.corsProbed) { const f = P.sounds.find(s => s.url); if (f) { P.corsProbed = true; probeCors(f.url); } }
@@ -233,7 +243,7 @@ async function refreshOffset() {
 function recompute() {
   if (!P.space) return;
   const n = now();
-  P.upcoming = upcomingBells(n - FIRE_WINDOW, P.rules, P.timetables, tz(), 7);
+  P.upcoming = upcomingBells(n - FIRE_WINDOW, P.rules, P.timetables, tz(), 7, ctx());
   P.upcomingAt = n;
   // 앞으로 이틀 동안 쓸 파일은 미리 불러 두기
   const keep = new Set();
@@ -261,8 +271,10 @@ async function heartbeat() {
       offsetMs: Math.round(P.offset),
       ua: navigator.userAgent.slice(0, 160),
       version: APP_VERSION,
-      mode: P.mode
+      mode: P.mode,
+      ...(P.logSince || !P.devLoaded ? {} : { logSince: todayKey(now(), tz()) })
     });
+    if (!P.logSince && P.devLoaded) P.logSince = todayKey(now(), tz());
   } catch (e) { console.warn(e); }
 }
 
@@ -298,8 +310,15 @@ function tick() {
     if (b.at > n) break;
     if (n - b.at > FIRE_WINDOW || fired[b.key]) continue;
     markFired(b.key);
-    if (P.started) ring(b);
+    if (P.started) { ring(b); logRing(b); }
   }
+}
+
+// 울린 종 기록 (관리자 [종합 관제]에서 놓친 종을 찾을 때 씀) — 하루에 문서 하나
+function logRing(b) {
+  if (PREVIEW || !P.saved || !b.dateKey) return;
+  F.setDoc(F.doc(F.db, 'spaces', P.saved.spaceId, 'devices', P.uid, 'logs', b.dateKey),
+    { date: b.dateKey, r: { [`${b.time}#${b.idx}`]: Date.now() } }, { merge: true }).catch(e => console.warn(e));
 }
 
 // ── 화면 그리기 ─────────────────────────────────────
@@ -315,51 +334,7 @@ function fmtLeft(ms) {
 const LOCK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 function isLocked() { return P.locked && Date.now() > P.unlockedUntil; }
 function bigDate(z) { return { y: z.y, md: `${z.m}월 ${z.d}일`, dow: `${DOW_LABELS[z.dow]}요일` }; }
-// 아날로그 시계 (SVG) — 시계판 디자인 6가지
-const ROMAN = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
-const KIDS = ['#F2A7A0', '#F6C48F', '#F5E08E', '#C6E3A0', '#A8DCC4', '#9FD3E8', '#A9C1EE', '#C1AEEA', '#E3AEDD', '#F2A7C3', '#F4B9A0', '#E9D3A0'];
-function analogSvg(z, dark, dial) {
-  dial = dial || P.opt.dial || 'classic';
-  const sec = z.s, min = z.mi + sec / 60, hr = (z.h % 12) + min / 60;
-  const pt = (r, a) => [(100 + r * Math.sin(a)).toFixed(1), (100 - r * Math.cos(a)).toFixed(1)];
-  let face = '', ticks = '', nums = '';
-  let cls = `an d-${dial} ${dark && dial !== 'kids' ? 'dk' : ''}`;
-  if (dial === 'kids') {
-    for (let i = 0; i < 12; i++) {
-      const a0 = (i - 0.5) * Math.PI / 6, a1 = (i + 0.5) * Math.PI / 6;
-      const [x0, y0] = pt(92, a0), [x1, y1] = pt(92, a1);
-      face += `<path d="M100 100 L${x0} ${y0} A92 92 0 0 1 ${x1} ${y1} Z" fill="${KIDS[i]}"/>`;
-    }
-    face += '<circle cx="100" cy="100" r="58" fill="#FFFDF8"/>';
-  }
-  for (let i = 0; i < 60; i++) {
-    const big = i % 5 === 0;
-    if (dial === 'kids' && !big) continue;
-    if (dial === 'gold' && !big) { ticks += `<circle cx="${pt(84, i * Math.PI / 30)[0]}" cy="${pt(84, i * Math.PI / 30)[1]}" r="0.9" class="dotk"/>`; continue; }
-    const r1 = dial === 'school' ? (big ? 72 : 74) : (big ? (dial === 'minimal' ? 66 : 78) : 82);
-    const r2 = dial === 'school' ? 80 : (dial === 'minimal' && big ? 88 : 89);
-    if (dial === 'minimal' && !big) continue;
-    ticks += `<line x1="100" y1="${100 - r2}" x2="100" y2="${100 - r1}" transform="rotate(${i * 6} 100 100)" class="${big ? 'tk big' : 'tk'}${dial === 'minimal' && i % 15 === 0 ? ' quarter' : ''}"/>`;
-  }
-  if (dial === 'school') for (let i = 1; i <= 12; i++) { const [x, y] = pt(87, i * Math.PI / 6); nums += `<text x="${x}" y="${(+y + 2.6).toFixed(1)}" class="mn">${i * 5}</text>`; }
-  if (dial !== 'minimal') for (let i = 1; i <= 12; i++) {
-    if (dial === 'gold' && i % 3) continue;
-    const r = dial === 'school' ? 60 : dial === 'kids' ? 75 : dial === 'roman' ? 66 : 68;
-    const [x, y] = pt(r, i * Math.PI / 6);
-    const label = dial === 'roman' || dial === 'gold' ? ROMAN[i % 12] : i;
-    nums += `<text x="${x}" y="${(+y + (dial === 'roman' || dial === 'gold' ? 4.5 : 5.5)).toFixed(1)}" class="nm">${label}</text>`;
-  }
-  const secCls = dial === 'school' ? 'sh red' : 'sh';
-  return `<svg viewBox="0 0 200 200" class="${cls}" aria-label="${z.h}시 ${z.mi}분">
-    <circle cx="100" cy="100" r="97" class="rim"/><circle cx="100" cy="100" r="92" class="face"/>
-    ${face}${ticks}${nums}
-    <text x="100" y="${dial === 'kids' ? 132 : 138}" class="brand">BELLKEEPER</text>
-    <line x1="100" y1="112" x2="100" y2="${dial === 'kids' ? 60 : 52}" class="hh" transform="rotate(${(hr * 30).toFixed(2)} 100 100)"/>
-    <line x1="100" y1="116" x2="100" y2="${dial === 'school' ? 26 : 30}" class="mh" transform="rotate(${(min * 6).toFixed(2)} 100 100)"/>
-    <g transform="rotate(${sec * 6} 100 100)"><line x1="100" y1="124" x2="100" y2="22" class="${secCls}"/><circle cx="100" cy="${dial === 'school' ? 100 : 36}" r="${dial === 'school' ? 4 : 3.2}" class="sd${dial === 'school' ? ' red' : ''}"/></g>
-    <circle cx="100" cy="100" r="5" class="cap"/><circle cx="100" cy="100" r="2" class="cap2"/>
-  </svg>`;
-}
+function analogSvg(z, dark, dial) { return clockSvg(z, dial || P.opt.dial || 'classic'); }
 // 쉬는 시간·밤에는 화면 보호, 정해 둔 시간마다 화면 바꾸기
 function effectiveMode(n, day) {
   if (PREVIEW) return P.mode;
@@ -388,11 +363,12 @@ function draw() {
   const clock = fmtClock(n, tz());
   const next = P.upcoming.filter(b => b.at > n);
   const nx = next[0];
-  const day = bellsForDay(key, P.rules, P.timetables, tz());
+  const day = bellsForDay(key, P.rules, P.timetables, tz(), ctx());
   const mode = effectiveMode(n, day);
   P.shown = mode;
   loadFont(P.opt.font);
   el.style.fontFamily = fontCss(P.opt.font);
+  if (mode !== 'ink') el.dataset.ink = '';
   const online = navigator.onLine && !P.fromCache;
   const checks = [
     [P.offsetOk, P.offsetOk ? '서버 시간 기준' : '기기 시계 기준'],
@@ -421,7 +397,7 @@ function draw() {
   const nxDay = b => b.dateKey !== key ? ` · ${h(koreanDate(b.dateKey))}` : '';
 
   if (mode === 'analog') {
-    el.className = 'pl analog';
+    el.className = `pl analog abg-${P.opt.abg || 'plain'}`;
     el.innerHTML = `${head}
       <div class="pl-an">
         <div class="pl-bigdate"><span>${big.md}</span><b>${big.dow}</b></div>
@@ -431,8 +407,62 @@ function draw() {
       </div>${foot}`;
     return applyShift();
   }
+  if (mode === 'ink') {
+    const art = (!P.opt.art || P.opt.art === 'auto') ? INK_SCENES[Math.floor(n / 1800000) % INK_SCENES.length].id : P.opt.art;
+    const sc = INK_SCENES.find(x => x.id === art) || INK_SCENES[0];
+    if (el.dataset.ink !== art || !el.querySelector('.ink-dyn')) {
+      el.className = 'pl ink';
+      el.innerHTML = `${inkArt(art)}<div class="ink-dyn"></div>`;
+      el.dataset.ink = art;
+    }
+    const z = clock.z;
+    const hj = `${hanjaNum(z.h % 12 === 0 ? 12 : z.h % 12)}時`;
+    el.querySelector('.ink-dyn').innerHTML = `${head}
+      <div class="ink-clock" style="--x:${sc.pos.x}%;--y:${sc.pos.y}%;--r:${sc.pos.r}">${inkClock(z, art)}</div>
+      <div class="ink-date" style="--x:${sc.pos.x}%;--y:${sc.pos.y}%;--r:${sc.pos.r}">${big.md} ${big.dow}</div>
+      ${sc.vt ? `<div class="ink-vt">${monthWord(z.m)} ${dayWord(z.d)} ${big.dow}</div><div class="ink-seal" style="background:${sc.seal || '#C8352A'}"><span>${hj}</span><span>${hanjaNum(z.mi) || '零'}分</span></div>` : ''}
+      <div class="ink-next">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+      ${foot}`;
+    return applyShift();
+  }
+  if (mode === 'digital') {
+    const id = DIGIS.includes(P.opt.digi) ? P.opt.digi : 'led';
+    el.className = `pl digital dg-${id}`;
+    el.innerHTML = `${head}
+      <div class="pl-dg">
+        <div class="dg-face">${digitalSvg(id, clock.hm, Number(clock.s))}</div>
+        <div class="dg-date">${big.md} ${big.dow}</div>
+        <div class="dg-next">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'hangul') {
+    const id = HGS.includes(P.opt.hg) ? P.opt.hg : 'gold';
+    const z = clock.z;
+    const next = nx ? `다음 종 ${h(nx.time)} ${h(nx.label || '종')}` : '';
+    el.className = `pl hangul hg-${id}`;
+    if (id === 'sentence') {
+      const special = z.mi === 0 && (z.h === 12 || z.h === 0);
+      el.innerHTML = `${head}
+        <div class="pl-hs">
+          <div class="hs-pre">지금은</div>
+          ${special ? `<div class="hs-big"><em>${z.h === 12 ? '정오' : '자정'}</em>예요</div>` :
+          `<div class="hs-big">${z.h < 12 ? '오전' : '오후'} <em>${hourWord(z.h)} 시</em></div>
+          <div class="hs-big">${z.mi ? `<em class="b">${sinoNum(z.mi)} 분</em>이에요` : '<em class="b">정각</em>이에요'}</div>`}
+          <div class="hs-sub">${monthWord(z.m)} ${dayWord(z.d)} ${big.dow}${next ? ` · ${next}` : ''}</div>
+        </div>${foot}`;
+      return applyShift();
+    }
+    const lit = hangulLit(z.h, z.mi);
+    el.innerHTML = `${head}
+      <div class="pl-hg">
+        <div class="hg-grid">${HG_GRID.map((row, r) => [...row].map((ch, c) => `<span class="${lit.has(`${r},${c}`) ? 'on' : ''}">${ch}</span>`).join('')).join('')}</div>
+        <div class="hg-sub">${z.h < 12 ? '오전' : '오후'} · ${big.md} ${big.dow}${next ? ` · ${next}` : ''}</div>
+      </div>${foot}`;
+    return applyShift();
+  }
   if (mode === 'analog3') {
-    el.className = 'pl analog3';
+    el.className = `pl analog3 abg-${P.opt.abg || 'plain'}`;
     el.innerHTML = `${head}
       <div class="pl-an3">
         <div class="an3-s an3-l"><div class="md">${big.md}</div><div class="dow">${big.dow}</div><div class="yr">${big.y}년${day.tt ? ` · ${h(day.tt.name)}` : ''}</div></div>
@@ -617,31 +647,27 @@ function closeMenu() {
 const SAMPLE_Z = { h: 10, mi: 9, s: 32, y: 2026, m: 10, d: 23, dow: 5 };
 function drawMenu() {
   const o = P.opt;
-  const keepScroll = gate.querySelector('.set-main');
-  const st = keepScroll ? keepScroll.scrollTop : 0;
   const pvSize = P.pvSize || 'tv';
-  gate.innerHTML = `<div class="set-page">
-    <header class="set-head">
-      <button class="btn" data-pl="close">← 재생 화면으로</button>
-      <div class="grow"><div class="bold" style="font-size:18px">재생기 설정</div><div class="tiny muted">고르면 바로 저장돼요</div></div>
-      <button class="btn gold" data-pl="close">저장하고 돌아가기</button>
-    </header>
-    <div class="set-body">
-      <aside class="set-pv">
-        <div class="row between"><div class="bold">미리 보기</div>
-          <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${pvSize === k ? 'on' : ''}" data-pl="pvsize" data-v="${k}">${t}</button>`).join('')}</div></div>
-        <div class="pv-box ${pvSize}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
-        <div class="tiny muted">버튼에 마우스를 올리면 그 모양으로 미리 보여요. 실제 화면과 똑같이 그려요.</div>
-      </aside>
-      <div class="set-main">
-        <section class="set-card wide"><h4>화면 모양</h4>
+  const mainHtml = `<section class="set-card wide"><h4>화면 모양</h4>
           <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${P.mode === s.id ? 'on' : ''}" data-pl="mode" data-v="${s.id}" data-pv="mode" aria-pressed="${P.mode === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
         </section>
         <section class="set-card"><h4>시계판 디자인 <span class="tiny muted">F·G·K 아날로그 화면</span></h4>
           <div class="dial-grid">${DIALS.map(d => `<button class="${o.dial === d.id ? 'on' : ''}" data-pl="dial" data-v="${d.id}" data-pv="dial"><span class="dial-mini">${analogSvg(SAMPLE_Z, false, d.id)}</span><b>${h(d.name)}</b><span class="muted tiny">${h(d.desc)}</span></button>`).join('')}</div>
         </section>
-        <section class="set-card"><h4>글씨체</h4>
-          <div class="font-grid">${FONTS.map(f => { loadFont(f.id); return `<button class="${o.font === f.id ? 'on' : ''}" data-pl="font" data-v="${f.id}" data-pv="font"><span class="fs" style="font-family:${f.css.replace(/"/g, "'")}">09:30 금요일</span><span class="muted tiny">${h(f.name)}</span></button>`; }).join('')}</div>
+        <section class="set-card"><h4>아날로그 배경 <span class="tiny muted">F·K 화면</span></h4>
+          <div class="sw-grid">${ABGS.map(b => `<button class="${(o.abg || 'plain') === b.id ? 'on' : ''}" data-pl="opt" data-k="abg" data-v="${b.id}" data-pv="abg"><span class="sw abg-${b.id}"></span><span class="tiny">${h(b.name)}</span></button>`).join('')}</div>
+        </section>
+        <section class="set-card wide"><h4>수묵화 그림 <span class="tiny muted">L 화면</span></h4>
+          <div class="art-grid">${INK_ARTS.map(a => `<button class="${(o.art || 'auto') === a.id ? 'on' : ''}" data-pl="opt" data-k="art" data-v="${a.id}" data-pv="art">${a.id === 'auto' ? '<span class="art-mini auto">↻</span>' : `<span class="art-mini">${inkArt(a.id)}</span>`}<span class="tiny">${h(a.name)}</span></button>`).join('')}</div>
+        </section>
+        <section class="set-card"><h4>디지털 모양 <span class="tiny muted">M 화면</span></h4>
+          <div class="dg-grid">${DIGI_STYLES.map(d => `<button class="${(o.digi || 'led') === d.id ? 'on' : ''}" data-pl="opt" data-k="digi" data-v="${d.id}" data-pv="digi"><span class="dg-mini dg-${d.id}">${digitalSvg(d.id, '10:09', 32)}</span><span class="tiny">${h(d.name)}</span></button>`).join('')}</div>
+        </section>
+        <section class="set-card"><h4>한글 시계 모양 <span class="tiny muted">N 화면 · 글씨체도 함께 골라 보세요</span></h4>
+          <div class="chips wrap">${HG_STYLES.map(x => `<button class="chip ${(o.hg || 'gold') === x.id ? 'on' : ''}" data-pl="opt" data-k="hg" data-v="${x.id}" data-pv="hg">${h(x.name)}</button>`).join('')}</div>
+        </section>
+        <section class="set-card wide"><h4>글씨체</h4>
+          <div class="font-grid">${FONTS.map(f => { loadFont(f.id); return `<button class="${o.font === f.id ? 'on' : ''}" data-pl="font" data-v="${f.id}" data-pv="font"><span class="fs" style="font-family:${f.css.replace(/"/g, "'")}">열 시 구 분</span><span class="muted tiny">${h(f.name)}</span></button>`; }).join('')}</div>
         </section>
         <section class="set-card"><h4>화면 보호 (모니터가 타지 않게)</h4>
           <div class="chips wrap"><button class="chip ${o.saver === 'night' ? 'on' : ''}" data-pl="saver" data-v="night">수업 없을 때 화면 보호</button>
@@ -661,12 +687,34 @@ function drawMenu() {
           <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
           <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
           <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button>
-        </section>
-      </div>
+        </section>`;
+  const page = gate.querySelector('.set-page');
+  if (page) {
+    // 미리 보기 창은 그대로 두고 설정 칸만 다시 그림 (깜빡임 없이)
+    const m = page.querySelector('.set-main'), st = m.scrollTop;
+    m.innerHTML = mainHtml; m.scrollTop = st;
+    page.querySelectorAll('[data-pl="pvsize"]').forEach(b => b.classList.toggle('on', b.dataset.v === pvSize));
+    const box = page.querySelector('.pv-box'); if (box) box.className = `pv-box ${pvSize}`;
+    pokePreview();
+    return;
+  }
+  gate.innerHTML = `<div class="set-page">
+    <header class="set-head">
+      <button class="btn" data-pl="close">← 재생 화면으로</button>
+      <div class="grow"><div class="bold" style="font-size:18px">재생기 설정</div><div class="tiny muted">고르면 바로 저장돼요</div></div>
+      <button class="btn gold" data-pl="close">저장하고 돌아가기</button>
+    </header>
+    <div class="set-body">
+      <aside class="set-pv">
+        <div class="row between"><div class="bold">미리 보기</div>
+          <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${pvSize === k ? 'on' : ''}" data-pl="pvsize" data-v="${k}">${t}</button>`).join('')}</div></div>
+        <div class="pv-box ${pvSize}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
+        <div class="tiny muted">버튼에 마우스를 올리면 그 모양으로 미리 보여요. 실제 화면과 똑같이 그려요.</div>
+      </aside>
+      <div class="set-main">${mainHtml}</div>
     </div>
     <footer class="set-foot"><button class="btn gold block" data-pl="close">저장하고 재생 화면으로 돌아가기</button></footer>
   </div>`;
-  const m = gate.querySelector('.set-main'); if (m && st) m.scrollTop = st;
 }
 // 미리 보기: 같은 재생기 화면을 작은 창(iframe)에 실제 크기로 그리고 줄여서 보여 줌
 const PV_SIZES = { tv: [1280, 720], tab: [1024, 768], phone: [390, 844] };
@@ -684,8 +732,8 @@ function pokePreview() { const fr = document.getElementById('pv-frame'); try { f
 window.__bkPreviewState = () => {
   const pv = P.pv || {};
   return {
-    space: P.space, saved: P.saved, timetables: P.timetables, rules: P.rules, sounds: P.sounds, offset: P.offset,
-    mode: pv.mode || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, font: pv.font || P.opt.font, dial: pv.dial || P.opt.dial }
+    space: P.space, saved: P.saved, timetables: P.timetables, rules: P.rules, groups: P.groups, group: P.group, sounds: P.sounds, offset: P.offset,
+    mode: pv.mode || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, ...Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')) }
   };
 };
 document.addEventListener('mouseover', e => {
@@ -761,6 +809,7 @@ document.addEventListener('click', async e => {
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); drawMenu(); mountPreview(); return; }
   if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); drawMenu(); mountPreview(); return; }
   if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'pvsize') { P.pvSize = b.dataset.v; drawMenu(); mountPreview(); return; }
   if (isLocked() && ['test', 'menu', 'update', 'unlink', 'mode', 'fullscreen'].includes(a)) return openPin(a === 'menu' ? 'menu' : '');
   if (a === 'test') { await unlockAudio(); ring({ soundId: 'b:dingdong', label: '소리 시험', volume: 100 }); }
@@ -810,9 +859,9 @@ if (PREVIEW) {
     try {
       const s = window.parent && window.parent !== window && window.parent.__bkPreviewState && window.parent.__bkPreviewState();
       if (s && s.space) {
-        Object.assign(P, { space: s.space, saved: s.saved || { name: '재생기' }, rules: s.rules || [], sounds: s.sounds || [], offset: s.offset || 0, offsetOk: true, mode: validMode(s.mode), opt: Object.assign({}, P.opt, s.opt) });
+        Object.assign(P, { space: s.space, saved: s.saved || { name: '재생기' }, rules: s.rules || [], groups: s.groups || [], group: s.group || '', sounds: s.sounds || [], offset: s.offset || 0, offsetOk: true, mode: validMode(s.mode), opt: Object.assign({}, P.opt, s.opt) });
         P.timetables = (s.timetables || []).map(t => ({ ...t, bells: cleanBells(t.bells) }));
-        P.upcoming = upcomingBells(now() - FIRE_WINDOW, P.rules, P.timetables, tz(), 7);
+        P.upcoming = upcomingBells(now() - FIRE_WINDOW, P.rules, P.timetables, tz(), 7, ctx());
         P.running = true; P.started = true; P.wake = true;
       }
     } catch (e) { /* 무시 */ }
