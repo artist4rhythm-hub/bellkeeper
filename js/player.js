@@ -1,7 +1,7 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName } from './core.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor } from './core.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
@@ -14,7 +14,9 @@ const gate = document.getElementById('gate');
 const overlay = document.getElementById('ringing');
 const LS_KEY = 'bk.player';
 const LS_MODE = 'bk.player.mode';
-const MODES = ['light', 'dark', 'board', 'big', 'period'];
+const MODES = ['light', 'dark', 'board', 'big', 'period', 'analog', 'analog2', 'date', 'flip', 'minimal'];
+const DARK_MODES = ['dark', 'big', 'analog2', 'flip', 'minimal'];
+const LS_OPT = 'bk.player.opt';
 function validMode(v) { return MODES.includes(v) ? v : 'light'; }
 const LS_FIRED = 'bk.player.fired';
 const FIRE_WINDOW = 20000;     // 정각을 놓쳐도 20초 안이면 울림
@@ -25,8 +27,12 @@ const P = {
   uid: null, saved: null, space: null, timetables: [], rules: [], sounds: [],
   offset: 0, offsetOk: false, running: false, unsub: [], seenCmd: null,
   mode: validMode(localStorage.getItem(LS_MODE)),
-  upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null
+  upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null,
+  // 화면 보호·음량·잠금 (관리자가 원격으로 바꾸면 그대로 따름)
+  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100 }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
+  locked: false, pinHash: '', unlockedUntil: 0, seen: {}
 };
+function saveOpt() { try { localStorage.setItem(LS_OPT, JSON.stringify(P.opt)); } catch (e) { /* 무시 */ } }
 const now = () => Date.now() + P.offset;
 const tz = () => (P.space && P.space.timezone) || 'Asia/Seoul';
 const soundsById = () => Object.fromEntries(P.sounds.map(s => [s.id, s]));
@@ -108,7 +114,7 @@ function showGate() {
     <button class="btn gold lg block" id="gate-go" style="min-height:64px;font-size:20px">재생 시작</button>
     <div class="tiny muted">화면을 켜 둔 채로 두세요. 이 기기를 껐다 켜면 다시 한 번 눌러야 해요.</div>
   </div>`;
-  document.getElementById('gate-go').onclick = async () => {
+  const go = async () => {
     await unlockAudio();
     await keepAwake();
     try { if (document.documentElement.requestFullscreen && matchMedia('(pointer:coarse)').matches) await document.documentElement.requestFullscreen(); } catch (e) { /* 무시 */ }
@@ -117,6 +123,12 @@ function showGate() {
     heartbeat();
     draw();
   };
+  document.getElementById('gate-go').onclick = go;
+  // 원격 새로 고침 뒤 등: 누르지 않아도 소리를 낼 수 있는 브라우저면 바로 시작
+  setTimeout(async () => {
+    if (P.started || gate.classList.contains('hidden')) return;
+    try { if (await unlockAudio() && !P.started && document.getElementById('gate-go')) go(); } catch (e) { /* 무시 */ }
+  }, 1500);
 }
 
 // ── 화면 켜짐 유지 ─────────────────────────────────────
@@ -151,7 +163,7 @@ function startRunning() {
   P.running = true;
   P.seenCmd = null;
   P.listenSince = Date.now() - 5000;
-  P.lastDisplay = undefined;
+  P.seen = {};
   gate.classList.add('hidden');
   el.classList.remove('hidden');
   const onErr = e => {
@@ -160,13 +172,18 @@ function startRunning() {
   };
   P.unsub.push(F.onSnapshot(myDoc(), d => {
     if (!d.exists()) { if (!d.metadata.fromCache) disconnected(); return; }
-    // 관리자가 [기기] 화면에서 화면 모양을 바꾸면 그대로 따름 (값이 바뀔 때만)
-    const disp = d.data().display;
-    if (disp && MODES.includes(disp) && disp !== P.lastDisplay) {
-      const first = P.lastDisplay === undefined;
-      P.lastDisplay = disp;
-      if (!first || disp !== P.mode) { P.mode = disp; try { localStorage.setItem(LS_MODE, disp); } catch (e) { /* 무시 */ } draw(); }
-    } else if (!disp) P.lastDisplay = null;
+    const x = d.data();
+    // 관리자가 [기기] 화면에서 바꾼 값은 "바뀐 때만" 따름 (재생기에서 직접 바꾼 값도 존중)
+    const changed = k => { const v = x[k]; const was = P.seen[k]; P.seen[k] = v; return v !== undefined && v !== was; };
+    let redraw = false;
+    if (changed('display') && MODES.includes(x.display) && x.display !== P.mode) { P.mode = x.display; try { localStorage.setItem(LS_MODE, P.mode); } catch (e) { /* 무시 */ } redraw = true; }
+    if (changed('saver') && ['night', 'off'].includes(x.saver)) { P.opt.saver = x.saver; redraw = true; }
+    if (changed('cycle') && [0, 15, 30, 60].includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
+    if (changed('vol') && Number.isFinite(x.vol)) { P.opt.vol = Math.max(10, Math.min(100, x.vol)); }
+    saveOpt();
+    const lockNow = !!x.locked && !!x.pinHash;
+    if (lockNow !== P.locked || (x.pinHash || '') !== P.pinHash) { P.locked = lockNow; P.pinHash = x.pinHash || ''; P.unlockedUntil = 0; redraw = true; if (!P.locked && gate.dataset.kind === 'pin') gate.classList.add('hidden'); }
+    if (redraw) draw();
   }, onErr));
   P.unsub.push(F.onSnapshot(F.doc(F.db, 'spaces', P.saved.spaceId), d => {
     if (d.exists()) { P.space = { id: d.id, ...d.data() }; P.fromCache = d.metadata.fromCache; recompute(); }
@@ -191,6 +208,7 @@ function startRunning() {
       if (at < P.listenSince || now() - at > 120000) continue;
       if (c.target && c.target !== P.uid) continue;
       if (c.type === 'stop') { stopAll(); hideRinging(); }
+      if (c.type === 'reload') { P.allowLeave = true; setTimeout(() => reloadToLatest(), 800); continue; }
       if (c.type === 'ring') {
         const extra = c.sayUrl ? { __cmd: { url: c.sayUrl } } : null;
         ring({ soundId: c.soundId, say: c.say || '', sayId: c.sayUrl ? '__cmd' : '', bgmId: c.bgmId || '', bgmVol: c.bgmVol || 30, label: c.label || '지금 울리기', volume: 100 }, extra);
@@ -248,7 +266,8 @@ async function heartbeat() {
 // ── 종 울리기 ─────────────────────────────────────
 function ring(b, extra) {
   showRinging(b);
-  const ctl = playBell(b, Object.assign(soundsById(), extra || {}));
+  const vol = Math.round((b.volume == null ? 100 : b.volume) * (P.opt.vol || 100) / 100);
+  const ctl = playBell({ ...b, volume: vol }, Object.assign(soundsById(), extra || {}));
   P.ringing = ctl;
   ctl.finished.then(() => { if (P.ringing === ctl) { P.ringing = null; hideRinging(); } });
 }
@@ -290,6 +309,52 @@ function fmtLeft(ms) {
   if (mm > 0) return `${mm}분 ${ss}초`;
   return `${ss}초`;
 }
+const LOCK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+function isLocked() { return P.locked && Date.now() > P.unlockedUntil; }
+function bigDate(z) { return { y: z.y, md: `${z.m}월 ${z.d}일`, dow: `${DOW_LABELS[z.dow]}요일` }; }
+// 아날로그 시계 (SVG)
+function analogSvg(z, dark) {
+  const sec = z.s, min = z.mi + sec / 60, hr = (z.h % 12) + min / 60;
+  let ticks = '';
+  for (let i = 0; i < 60; i++) {
+    const a = i * 6, big = i % 5 === 0;
+    ticks += `<line x1="100" y1="${big ? 9 : 10}" x2="100" y2="${big ? 22 : 15}" transform="rotate(${a} 100 100)" class="${big ? 'tk big' : 'tk'}"/>`;
+  }
+  let nums = '';
+  for (let i = 1; i <= 12; i++) {
+    const a = i * Math.PI / 6, r = 70;
+    nums += `<text x="${(100 + r * Math.sin(a)).toFixed(1)}" y="${(100 - r * Math.cos(a) + 5.5).toFixed(1)}" class="nm">${i}</text>`;
+  }
+  return `<svg viewBox="0 0 200 200" class="an ${dark ? 'dk' : ''}" aria-label="${z.h}시 ${z.mi}분">
+    <circle cx="100" cy="100" r="97" class="rim"/><circle cx="100" cy="100" r="92" class="face"/>
+    ${ticks}${nums}
+    <text x="100" y="138" class="brand">BELLKEEPER</text>
+    <line x1="100" y1="112" x2="100" y2="54" class="hh" transform="rotate(${(hr * 30).toFixed(2)} 100 100)"/>
+    <line x1="100" y1="116" x2="100" y2="30" class="mh" transform="rotate(${(min * 6).toFixed(2)} 100 100)"/>
+    <g transform="rotate(${sec * 6} 100 100)"><line x1="100" y1="124" x2="100" y2="22" class="sh"/><circle cx="100" cy="36" r="3.2" class="sd"/></g>
+    <circle cx="100" cy="100" r="5" class="cap"/><circle cx="100" cy="100" r="2" class="cap2"/>
+  </svg>`;
+}
+// 쉬는 시간·밤에는 화면 보호, 정해 둔 시간마다 화면 바꾸기
+function effectiveMode(n, day) {
+  if (P.opt.saver === 'night') {
+    const L = day.bells;
+    const off = !L.length || n < L[0].at - 30 * 60000 || n > L[L.length - 1].at + 15 * 60000;
+    if (off && !P.ringing) return 'minimal';
+  }
+  if (P.opt.cycle > 0 && P.mode !== 'minimal') {
+    const list = MODES.filter(m => m !== 'minimal');
+    const k = Math.floor(n / (P.opt.cycle * 60000));
+    return list[(list.indexOf(P.mode) + k) % list.length];
+  }
+  return P.mode;
+}
+// 화면 타는 것 방지: 1분마다 화면 전체를 몇 픽셀씩 옮김 (눈에는 거의 안 보임)
+function applyShift() {
+  const k = Math.floor(Date.now() / 60000) % 8;
+  const a = k * Math.PI / 4;
+  el.style.transform = `translate(${(Math.cos(a) * 4).toFixed(1)}px, ${(Math.sin(a) * 4).toFixed(1)}px)`;
+}
 function draw() {
   if (!P.running || !P.space) return;
   const n = now();
@@ -298,6 +363,8 @@ function draw() {
   const next = P.upcoming.filter(b => b.at > n);
   const nx = next[0];
   const day = bellsForDay(key, P.rules, P.timetables, tz());
+  const mode = effectiveMode(n, day);
+  P.shown = mode;
   const online = navigator.onLine && !P.fromCache;
   const checks = [
     [P.offsetOk, P.offsetOk ? '서버 시간 기준' : '기기 시계 기준'],
@@ -305,22 +372,86 @@ function draw() {
     [!!P.wake || !('wakeLock' in navigator), P.wake ? '화면 켜짐 유지' : (('wakeLock' in navigator) ? '화면 켜짐 유지 안 됨' : '화면 꺼짐을 "안 함"으로')],
     [audioReady(), audioReady() ? '소리 준비됨' : '소리 대기']
   ];
-  const ck = ok => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${ok ? ((P.mode === 'dark' || P.mode === 'big') ? '#4CC28A' : '#2F6B4F') : '#A23B2A'}" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">${ok ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 7v6M12 17v.5"/>'}</svg>`;
+  const ck = ok => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${ok ? (DARK_MODES.includes(mode) ? '#4CC28A' : '#2F6B4F') : '#A23B2A'}" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">${ok ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 7v6M12 17v.5"/>'}</svg>`;
   const foot = `<div class="pl-foot">
       ${online ? '' : '<span class="pl-offline">인터넷 끊김 · 저장된 일정으로 울려요</span>'}
+      ${mode === 'minimal' && P.mode !== 'minimal' ? '<span class="small" style="opacity:.8">화면 보호 중 · 수업 시간이 되면 원래 화면으로</span>' : ''}
       ${checks.map(([ok, t]) => `<span class="row" style="gap:6px">${ck(ok)}${h(t)}</span>`).join('')}
       <span class="grow"></span>
       <span class="small num" style="opacity:.7">v${h(APP_VERSION)}</span>
       ${P.update && P.update.isNew ? `<button class="btn" data-pl="update" style="border-color:var(--brass);color:inherit">새 버전 ${h(P.update.latest)} 업데이트</button>` : ''}
+      ${isLocked() ? `<button class="btn" data-pl="unlock" aria-label="잠금 풀기">${LOCK} 잠김</button>` : `${P.locked ? `<button class="btn" data-pl="relock">${LOCK} 다시 잠그기</button>` : ''}
       <button class="btn" data-pl="test">소리 시험</button>
-      <button class="btn" data-pl="menu">설정</button>
+      <button class="btn" data-pl="menu">설정</button>`}
     </div>`;
   const head = `<div class="pl-top"><div class="row pl-name">${LOGO}<span class="ellipsis">${h(P.space.name)} · ${h(P.saved.name || '재생기')}</span></div>
-      ${(P.mode === 'dark' || P.mode === 'period') ? `<div class="bold num" style="font-size:22px">${clock.hm}</div>` : `<div class="row status-ok" style="gap:8px"><span class="dot ok"></span>재생 중</div>`}</div>`;
+      ${['dark', 'period', 'analog2'].includes(mode) ? `<div class="bold num" style="font-size:22px">${clock.hm}</div>` : `<div class="row status-ok" style="gap:8px"><span class="dot ok"></span>재생 중</div>`}</div>`;
 
+  const big = bigDate(clock.z);
+  const upc = (k, from = 0) => next.slice(from, from + k).map(b => `<div class="pl-up"><span class="cdot" style="background:${bellColor(b).c}"></span><b class="num">${h(b.time)}</b><span class="ellipsis">${h(b.label || '종')}${nxDay(b)}</span></div>`).join('');
   const sname = id => isBuiltin(id) ? builtinName(id) : ((soundsById()[id] || {}).name || '');
   const nxDay = b => b.dateKey !== key ? ` · ${h(koreanDate(b.dateKey))}` : '';
-  if (P.mode === 'board') {
+
+  if (mode === 'analog') {
+    el.className = 'pl analog';
+    el.innerHTML = `${head}
+      <div class="pl-an">
+        <div class="pl-bigdate"><span>${big.md}</span><b>${big.dow}</b></div>
+        <div class="pl-face">${analogSvg(clock.z)}</div>
+        <div class="pl-digi num">${clock.hm}<small>:${clock.s}</small></div>
+        <div class="pl-nextline">${nx ? `<span class="tag">다음 종</span><b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'analog2') {
+    el.className = 'pl analog2';
+    el.innerHTML = `${head}
+      <div class="pl-body">
+        <div class="pl-an2-left"><div class="pl-face">${analogSvg(clock.z, true)}</div><div class="pl-digi num">${clock.hm}<small>:${clock.s}</small></div></div>
+        <div class="pl-an2-right">
+          <div class="md">${big.md}</div><div class="dow">${big.dow}</div>
+          <div class="yr">${big.y}년 ${day.tt ? `· ${h(day.tt.name)}` : '· 오늘은 종 없음'}</div>
+          <div class="nxcard">${nx ? `<div class="small" style="opacity:.75">다음 종${nxDay(nx)}</div><div class="t num">${h(nx.time)}</div><div class="l">${h(nx.label || '종')}</div><div style="opacity:.85">${fmtLeft(nx.at - n)} 남음</div>` : '<div class="l">앞으로 7일 동안 울릴 종이 없어요</div>'}</div>
+          <div class="ups">${upc(3, 1)}</div>
+        </div>
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'date') {
+    el.className = 'pl date';
+    el.innerHTML = `${head}
+      <div class="pl-dt">
+        <div class="dow">${big.dow}</div>
+        <div class="md">${big.y}년 ${big.md}</div>
+        <div class="tm num">${clock.hm}<small>:${clock.s}</small></div>
+        <div class="pl-nextline">${nx ? `<span class="tag">다음 종</span><b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'flip') {
+    const card = d => `<span class="fc"><span>${d}</span></span>`;
+    el.className = 'pl flip';
+    el.innerHTML = `${head}
+      <div class="pl-flip">
+        <div class="pl-bigdate"><span>${big.md}</span><b>${big.dow}</b></div>
+        <div class="fl num">${card(clock.hm[0])}${card(clock.hm[1])}<span class="colon">:</span>${card(clock.hm[3])}${card(clock.hm[4])}<span class="sec">${clock.s}</span></div>
+        <div class="pl-nextline">${nx ? `<span class="tag">다음 종</span><b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'minimal') {
+    // 화면 보호: 어두운 바탕에 작은 시계가 천천히 떠다녀서 화면이 타지 않게
+    const t = n / 1000;
+    const x = 50 + 30 * Math.sin(t / 97), y = 45 + 25 * Math.sin(t / 131 + 1);
+    el.className = 'pl minimal';
+    el.innerHTML = `<div class="pl-min" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">
+        <div class="tm num">${clock.hm}</div>
+        <div class="dt">${big.md} ${big.dow}</div>
+        ${nx ? `<div class="nx">다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')}${nxDay(nx)}</div>` : ''}
+      </div>${foot}`;
+    return applyShift();
+  }
+  if (mode === 'board') {
     const list = day.bells;
     const ni = list.findIndex(b => b.at > n);
     const from = Math.max(0, Math.min((ni < 0 ? list.length : ni) - 2, list.length - 12));
@@ -339,14 +470,14 @@ function draw() {
         </div>
         <div class="pl-board-list">
           <div class="row between" style="padding:6px 14px 8px"><b style="font-size:clamp(15px,1.8vw,20px)">${day.tt ? h(day.tt.name) : '오늘은 종 없음'}</b><span class="small muted">오늘 종 ${list.length}개</span></div>
-          ${rows.length ? rows.map(b => `<div class="r ${b.at <= n ? 'past' : ''} ${nx && b === list[ni] ? 'next' : ''}"><b class="num">${h(b.time)}</b><span class="grow" style="min-width:0">${h(b.label || '종')}${b.say ? ` <span class="s">"${h(b.say)}"</span>` : ''}</span></div>`).join('')
+          ${rows.length ? rows.map(b => `<div class="r ${b.at <= n ? 'past' : ''} ${nx && b === list[ni] ? 'next' : ''}"><span class="cdot" style="background:${bellColor(b).c}"></span><b class="num">${h(b.time)}</b><span class="grow" style="min-width:0">${h(b.label || '종')}${b.say ? ` <span class="s">"${h(b.say)}"</span>` : ''}</span></div>`).join('')
             : '<div class="muted" style="padding:20px 14px;font-size:18px">오늘은 울릴 종이 없어요. 다음 종은 왼쪽에 보여요.</div>'}
           ${list.length > from + 12 ? `<div class="small muted" style="padding:6px 14px">그 뒤로 ${list.length - from - 12}개 더</div>` : ''}
         </div>
       </div>${foot}`;
-    return;
+    return applyShift();
   }
-  if (P.mode === 'big') {
+  if (mode === 'big') {
     const sec = Number(clock.s) || 0;
     el.className = 'pl big';
     el.innerHTML = `${head}
@@ -356,9 +487,9 @@ function draw() {
         <div class="sec" aria-hidden="true"><div style="width:${((sec + 1) / 60 * 100).toFixed(1)}%"></div></div>
         <div class="nx">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
       </div>${foot}`;
-    return;
+    return applyShift();
   }
-  if (P.mode === 'period') {
+  if (mode === 'period') {
     const list = day.bells;
     const prev = list.filter(b => b.at <= n).pop();
     const todayNext = list.find(b => b.at > n);
@@ -386,10 +517,10 @@ function draw() {
         ${todayNext ? `<div class="left"><b class="num">${fmtLeft(todayNext.at - n)}</b> 남음 · 다음 ${h(todayNext.label || '종')}</div>` : (nx ? `<div class="left">다음 종 <b class="num">${h(nx.time)}</b>${nxDay(nx)}</div>` : '')}
         ${ups.length ? `<div class="chips2">${ups.map(b => `<span><b class="num">${h(b.time)}</b> ${h(b.label || '종')}</span>`).join('')}</div>` : ''}
       </div>${foot}`;
-    return;
+    return applyShift();
   }
 
-  if (P.mode === 'dark') {
+  if (mode === 'dark') {
     const prev = day.bells.filter(b => b.at <= n).pop();
     let pct = 0;
     if (nx) {
@@ -428,16 +559,28 @@ function draw() {
         </div>
       </div>${foot}`;
   }
+  applyShift();
 }
 
 // ── 설정 메뉴 ─────────────────────────────────────
 function openMenu() {
+  if (isLocked()) return openPin('menu');
   gate.classList.remove('hidden');
-  gate.innerHTML = `<div class="card stack">
-    <div class="bold" style="font-size:18px">재생기 설정</div>
+  gate.dataset.kind = 'menu';
+  const o = P.opt;
+  gate.innerHTML = `<div class="card stack" style="max-width:720px">
+    <div class="row between"><div class="bold" style="font-size:18px">재생기 설정</div><button class="btn primary" data-pl="close">닫기</button></div>
     <div class="field"><span class="small bold">화면 모양</span>
       <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${P.mode === s.id ? 'on' : ''}" data-pl="mode" data-v="${s.id}" aria-pressed="${P.mode === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
       <div class="tiny muted">관리자 화면 › 기기 에서도 바꿀 수 있어요.</div></div>
+    <div class="field"><span class="small bold">화면 보호 (모니터가 타지 않게)</span>
+      <div class="chips wrap">
+        <button class="chip ${o.saver === 'night' ? 'on' : ''}" data-pl="saver" data-v="night">수업 없을 때 화면 보호</button>
+        <button class="chip ${o.saver === 'off' ? 'on' : ''}" data-pl="saver" data-v="off">항상 고른 화면</button></div>
+      <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${o.cycle === v ? 'on' : ''}" data-pl="cycle" data-v="${v}">${t}</button>`).join('')}</div>
+      <div class="tiny muted">1분마다 화면이 몇 픽셀씩 움직이는 기능은 항상 켜져 있어요.</div></div>
+    <div class="field"><span class="small bold">재생기 음량 <span id="pl-vol-lab">${o.vol}%</span></span>
+      <input type="range" id="pl-vol" min="10" max="100" step="5" value="${o.vol}"></div>
     <button class="btn block" data-pl="fullscreen">전체 화면</button>
     <div class="field"><span class="small bold">기기 음성 (Google 음성을 안 쓸 때 안내 문구를 읽는 목소리)</span>
       <select class="input" id="pl-voice">${(() => { const pref = getDeviceVoicePref(); const vs = deviceVoices();
@@ -445,15 +588,71 @@ function openMenu() {
       <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow">
       <button class="btn" data-pl="voice-test">들어보기</button></div></div>
     <button class="btn block" data-pl="test">소리 시험</button>
-    <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중</div>
+    <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
     <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button>
-    <button class="btn primary block" data-pl="close">닫기</button>
   </div>`;
 }
+// ── 잠금 (비밀번호) ─────────────────────────────────────
+let pinBuf = '', pinFails = 0, pinWaitUntil = 0, pinNext = '';
+async function pinHashOf(pin) {
+  const data = new TextEncoder().encode(`bellkeeper|${P.uid}|${pin}`);
+  const d = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function openPin(nextAct, msg) {
+  pinBuf = ''; pinNext = nextAct || '';
+  gate.classList.remove('hidden');
+  gate.dataset.kind = 'pin';
+  drawPin(msg);
+}
+function drawPin(msg) {
+  const wait = Math.max(0, Math.ceil((pinWaitUntil - Date.now()) / 1000));
+  gate.innerHTML = `<div class="card stack pinpad">
+    <div class="center">${LOCK.replace('width="16" height="16"', 'width="34" height="34"')}</div>
+    <div class="bold center" style="font-size:20px">잠긴 재생기</div>
+    <div class="small muted center">${wait ? `${wait}초 뒤에 다시 넣어 주세요` : h(msg || '관리자가 정한 비밀번호를 넣어 주세요')}</div>
+    <div class="pin-dots" aria-label="${pinBuf.length}자리 입력됨">${Array.from({ length: Math.max(4, pinBuf.length) }, (_, i) => `<span class="${i < pinBuf.length ? 'on' : ''}"></span>`).join('')}</div>
+    <div class="pin-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'].map(k => `<button data-pl="pin" data-v="${k}" ${wait ? 'disabled' : ''} aria-label="${k === 'del' ? '지우기' : k === 'ok' ? '확인' : k}">${k === 'del' ? '지움' : k === 'ok' ? '확인' : k}</button>`).join('')}</div>
+    <button class="btn block" data-pl="close">취소</button>
+  </div>`;
+}
+async function pinKey(k) {
+  if (Date.now() < pinWaitUntil) return drawPin();
+  if (k === 'del') pinBuf = pinBuf.slice(0, -1);
+  else if (k === 'ok') {
+    if (pinBuf.length < 4) return drawPin('4자리 이상 넣어 주세요');
+    const ok = (await pinHashOf(pinBuf)) === P.pinHash;
+    pinBuf = '';
+    if (!ok) {
+      pinFails++;
+      if (pinFails >= 5) { pinWaitUntil = Date.now() + 30000; pinFails = 0; setTimeout(() => { if (gate.dataset.kind === 'pin') drawPin(); }, 30500); }
+      return drawPin('비밀번호가 달라요');
+    }
+    pinFails = 0;
+    P.unlockedUntil = Date.now() + 3 * 60000;   // 3분 동안 풀림 → 저절로 다시 잠김
+    gate.classList.add('hidden'); gate.dataset.kind = '';
+    draw();
+    if (pinNext === 'menu') openMenu();
+    return;
+  } else if (/^\d$/.test(k) && pinBuf.length < 8) pinBuf += k;
+  drawPin();
+}
+window.addEventListener('beforeunload', e => {
+  // 잠긴 재생기는 실수로 닫히지 않게 한 번 더 물어봄
+  if (P.locked && !P.allowLeave && P.running) { e.preventDefault(); e.returnValue = ''; }
+});
+setInterval(() => { if (P.locked && P.unlockedUntil && Date.now() > P.unlockedUntil) { P.unlockedUntil = 0; if (gate.dataset.kind === 'menu') { gate.classList.add('hidden'); gate.dataset.kind = ''; } draw(); } }, 5000);
+
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-pl]');
   if (!b) return;
   const a = b.dataset.pl;
+  if (a === 'unlock') return openPin('');
+  if (a === 'relock') { P.unlockedUntil = 0; return draw(); }
+  if (a === 'pin') return pinKey(b.dataset.v);
+  if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); openMenu(); return draw(); }
+  if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); openMenu(); return draw(); }
+  if (isLocked() && ['test', 'menu', 'update', 'unlink', 'mode', 'fullscreen'].includes(a)) return openPin(a === 'menu' ? 'menu' : '');
   if (a === 'test') { await unlockAudio(); ring({ soundId: 'b:dingdong', label: '소리 시험', volume: 100 }); }
   if (a === 'voice-test') {
     const uri = document.getElementById('pl-voice').value, rate = Number(document.getElementById('pl-rate').value) || 1;
@@ -464,12 +663,13 @@ document.addEventListener('click', async e => {
   if (a === 'menu') openMenu();
   if (a === 'update') {
     if (!confirm('새 버전으로 업데이트할까요? 업데이트 뒤 [재생 시작]을 한 번 눌러 주세요.')) return;
+    P.allowLeave = true;
     return reloadToLatest();
   }
   if (a === 'close') {
     const v = document.getElementById('pl-voice'), r = document.getElementById('pl-rate');
     if (v) setDeviceVoicePref(v.value, Number(r.value) || 1);
-    gate.classList.add('hidden'); draw();
+    gate.classList.add('hidden'); gate.dataset.kind = ''; draw();
   }
   if (a === 'mode') { P.mode = validMode(b.dataset.v); localStorage.setItem(LS_MODE, P.mode); openMenu(); draw(); heartbeat(); }
   if (a === 'fullscreen') { try { await document.documentElement.requestFullscreen(); } catch (err) { /* 무시 */ } gate.classList.add('hidden'); }
@@ -511,3 +711,12 @@ if (!F.configured) {
     else showConnect();
   });
 }
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'pl-vol') { P.opt.vol = Number(e.target.value); saveOpt(); const l = document.getElementById('pl-vol-lab'); if (l) l.textContent = P.opt.vol + '%'; }
+});
+document.addEventListener('keydown', e => {
+  if (gate.dataset.kind === 'pin' && !gate.classList.contains('hidden')) {
+    if (/^\d$/.test(e.key)) pinKey(e.key); else if (e.key === 'Backspace') pinKey('del'); else if (e.key === 'Enter') pinKey('ok');
+  }
+});

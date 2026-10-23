@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.7.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -16,8 +16,35 @@ export const PLAYER_STYLES = [
   { id: 'dark', name: 'B 카운트다운', desc: '어두운 화면, 남은 시간을 원으로' },
   { id: 'board', name: 'C 일정판', desc: '오늘 종 전체 목록 · 교무실 TV용' },
   { id: 'big', name: 'D 큰 시계', desc: '멀리서도 보이는 아주 큰 시계' },
-  { id: 'period', name: 'E 교시 진행', desc: '지금 교시와 남은 시간 막대' }
+  { id: 'period', name: 'E 교시 진행', desc: '지금 교시와 남은 시간 막대' },
+  { id: 'analog', name: 'F 아날로그', desc: '바늘 시계 + 디지털 + 큰 날짜' },
+  { id: 'analog2', name: 'G 아날로그 일정', desc: '어두운 바탕 · 바늘 시계와 큰 요일' },
+  { id: 'date', name: 'H 날짜 크게', desc: '요일·날짜를 아주 크게' },
+  { id: 'flip', name: 'I 넘김 시계', desc: '숫자 카드가 넘어가는 시계' },
+  { id: 'minimal', name: 'J 화면 보호', desc: '검은 화면에 작은 시계가 떠다님' }
 ];
+// 종 색 표시 (일과표에서 한눈에) — 직접 고르지 않으면 이름으로 자동
+export const BELL_COLORS = [
+  { id: 'start', name: '수업 시작', c: '#2F8F5B', bg: '#E3F1E8' },
+  { id: 'end', name: '수업 끝', c: '#C9822B', bg: '#F8EBD7' },
+  { id: 'break', name: '쉬는 시간', c: '#3C7DBF', bg: '#E2EDF8' },
+  { id: 'meal', name: '점심·식사', c: '#C0567F', bg: '#F7E4EC' },
+  { id: 'notice', name: '안내·행사', c: '#7A5BC4', bg: '#ECE6F8' },
+  { id: 'etc', name: '기타', c: '#7C8580', bg: '#ECEDEB' }
+];
+export function autoColorId(label) {
+  const L = String(label || '');
+  if (/시작|입실|등교|조회/.test(L)) return 'start';
+  if (/끝|종료|마침|하교|퇴근/.test(L)) return 'end';
+  if (/점심|식사|급식|간식/.test(L)) return 'meal';
+  if (/쉬는|휴식|쉼/.test(L)) return 'break';
+  if (/안내|방송|예배|선포|암송|기도|행사|모임/.test(L)) return 'notice';
+  return 'etc';
+}
+export function bellColor(b) {
+  const id = (b && b.color && b.color !== 'auto') ? b.color : autoColorId(b && b.label);
+  return BELL_COLORS.find(x => x.id === id) || BELL_COLORS[BELL_COLORS.length - 1];
+}
 export function styleName(id) { const s = PLAYER_STYLES.find(x => x.id === id); return s ? s.name : PLAYER_STYLES[0].name; }
 
 export const DOW_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -221,6 +248,7 @@ export function cleanBells(bells) {
       o.maxSec = Number.isFinite(ms) ? Math.min(3600, Math.max(0, Math.round(ms))) : 0;
       o.say = String(b.say || '').slice(0, 120);
       if (b.sayId && o.say) o.sayId = String(b.sayId).slice(0, 60);
+      if (b.color && BELL_COLORS.some(x => x.id === b.color)) o.color = b.color;
       const rp = Math.round(Number(b.repeat));
       if (rp > 1) o.repeat = Math.min(5, rp);
       const sr = Math.round(Number(b.sayRepeat));

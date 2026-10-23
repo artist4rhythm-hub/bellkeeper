@@ -1,5 +1,5 @@
 // 벨키퍼 서비스 워커 — 인터넷이 끊겨도 화면과 기본 종소리가 뜨도록 앱 파일을 저장해 둡니다.
-const CACHE = 'bellkeeper-v1.6.0';
+const CACHE = 'bellkeeper-v1.7.0';
 const SOUNDS = 'bellkeeper-sounds-v1';   // 기본 종소리는 바뀌지 않으니 따로 오래 보관
 const SHELL = [
   './', './index.html', './app.html', './play.html', './css/style.css',
@@ -21,7 +21,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   // 기본 종소리·배경음악: 저장본 먼저 (한 번 받으면 인터넷 없이도 울림)
-  if (url.origin === location.origin && (url.pathname.includes('/sounds/') || url.pathname.includes('/bgm/'))) {
+  if (url.origin === location.origin && (url.pathname.includes('/sounds/') || url.pathname.includes('/sounds2/') || url.pathname.includes('/bgm/'))) {
     e.respondWith(caches.open(SOUNDS).then(c => c.match(req).then(hit => hit || fetch(req).then(res => {
       if (res.ok && res.status === 200) c.put(req, res.clone());
       return res;

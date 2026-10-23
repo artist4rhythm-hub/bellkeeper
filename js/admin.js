@@ -3,7 +3,7 @@ import * as F from './fb.js';
 import {
   APP_VERSION, SPACE_TYPES, DOW_LABELS, RULE_KINDS, todayKey, koreanDate, shortDate, addDays, dowOfKey,
   parseKey, dateKey, resolveDay, bellsForDay, upcomingBells, sortRules, fmtRemain, fmtRemainWords,
-  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName
+  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName, BELL_COLORS, bellColor, autoColorId
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById, makeLessons } from './templates.js';
 import { KR_HOLIDAYS } from './holidays.js';
@@ -502,7 +502,7 @@ function viewToday() {
       <div class="small muted" style="padding:0 10px 6px">${day.tt ? `${h(day.tt.name)} · ` : ''}${day.rule ? `${RULE_KINDS[day.rule.kind].label} 규칙: ${h(ruleLabel(day.rule))}` : '적용된 규칙이 없어요'}</div>
       ${day.bells.length ? day.bells.map((b, i) => {
         const cls = i === nextIdx ? 'next' : (b.at <= now ? 'past' : '');
-        return `<div class="bell-row ${cls}"><div class="t num">${h(b.time)}</div>
+        return `<div class="bell-row ${cls}"><span class="cdot" style="background:${bellColor(b).c}" title="${h(bellColor(b).name)}"></span><div class="t num">${h(b.time)}</div>
           <div class="grow"><div style="font-weight:500">${h(b.label || '종')}</div><div class="small muted">${h(soundName(b.soundId))}${b.say ? ` · "${h(b.say)}"` : ''}${b.bgmId ? ` · 배경음악 ${h(soundName(b.bgmId))}` : ''}</div></div>
           <button class="icon-btn sm soft" data-act="preview" data-tt="${h(day.tt.id)}" data-i="${b.idx}" aria-label="${h(b.label)} 미리 듣기">${I.play}</button></div>`;
       }).join('') : `<div class="muted center" style="padding:24px">오늘은 종이 없어요</div>`}
@@ -617,7 +617,7 @@ function viewSounds() {
       <button class="icon-btn sm soft" data-act="play-sound" data-id="${s.id}" aria-label="${h(s.name)} 듣기">${I.play}</button></div>`).join('')}</div>`).join('')}
     <div class="row wrap"><button class="btn ghost" data-act="stop-all">재생 멈추기</button></div>
     <details class="small muted"><summary>음원 출처</summary>
-      <p style="line-height:1.7">· 학교종·차임·종·멜로디·알림·경보·명상: 벨키퍼가 직접 합성한 소리<br>
+      <p style="line-height:1.7">· 수업 시작·끝 종, 학교종·차임, 종, 세계의 종, 멜로디(짧은·긴), 찬송가·성가, 알림·경보·명상: 벨키퍼가 직접 합성한 소리 (곡은 저작권이 끝난 공개 저작물·민요)<br>
       · 징글·전자음: Kenney (kenney.nl) — CC0<br>
       · 배경음악: OpenGameArt.org 작가 Joth, Tozan, cynicmusic, wipics, Centurion_of_war, haruta, Cakeflaps, Komiku, Pro Sensory, TAD, Yoiyami, Samza, Wolfgang_, nene, TinyWorlds, congusbongus, Zane Little Music, celestialghost8 — CC0<br>
       모두 저작권 걱정 없이 무료로 쓸 수 있어요.</p></details>
@@ -1030,7 +1030,7 @@ function normTime(v) {
   return `${pad(H)}:${pad(M)}`;
 }
 function addMin(t, mins) { let x = timeToSec(t) / 60 + mins; x = ((x % 1440) + 1440) % 1440; return `${pad(Math.floor(x / 60))}:${pad(Math.floor(x % 60))}`; }
-const bellCopy = b => { const o = { time: b.time, label: b.label || '', soundId: b.soundId || 'b:westminster', volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; if (b.bgmId) { o.bgmId = b.bgmId; o.bgmVol = b.bgmVol == null ? 30 : b.bgmVol; } return o; };
+const bellCopy = b => { const o = { time: b.time, label: b.label || '', soundId: b.soundId || 'b:westminster', volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; if (b.color) o.color = b.color; if (b.bgmId) { o.bgmId = b.bgmId; o.bgmVol = b.bgmVol == null ? 30 : b.bgmVol; } return o; };
 const knownSound = id => !id || id === 'none' || isBuiltin(id) || S.sounds.some(s => s.id === id);
 function fitToSpace(b) {
   const o = { ...bellCopy(b), _open: false };
@@ -1121,6 +1121,7 @@ function bulkPanel(sh) {
       <label class="field"><span>음량</span><select class="input" id="bk-vol"><option value="">그대로</option>${vols.map(v => `<option value="${v}">${v}%</option>`).join('')}</select></label>
       <label class="field"><span>안내 문구</span><input class="input" id="bk-say" maxlength="120" placeholder="그대로"></label>
       <label class="field"><span>배경음악</span><select class="input" id="bk-bgm"><option value="__keep">그대로</option>${bgmOptions('__none__').replace('selected', '')}</select></label>
+      <label class="field"><span>색</span><select class="input" id="bk-color"><option value="__keep">그대로</option><option value="">자동 (이름으로)</option>${BELL_COLORS.map(c => `<option value="${c.id}">${h(c.name)}</option>`).join('')}</select></label>
       <label class="field"><span>종소리 반복</span><select class="input" id="bk-rep"><option value="">그대로</option>${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${n === 1 ? '1번 (반복 없음)' : n + '번'}</option>`).join('')}</select></label>
       <label class="field"><span>안내 문구 반복</span><select class="input" id="bk-srep"><option value="">그대로</option>${[1, 2, 3].map(n => `<option value="${n}">${n === 1 ? '1번 (반복 없음)' : n + '번'}</option>`).join('')}</select></label>
       <label class="field"><span>최대 재생</span><select class="input" id="bk-max"><option value="">그대로</option><option value="0">끝까지</option>${[5, 10, 20, 30, 60, 120, 180].map(v => `<option value="${v}">${v}초</option>`).join('')}</select></label>
@@ -1182,7 +1183,8 @@ function sheetTtEdit(sh) {
     const sel = sh.sel.has(i);
     const bad = b.time && !/^\d{2}:\d{2}$/.test(b.time);
     const sum = [b.repeat > 1 ? `종 ${b.repeat}번` : '', b.say ? `"${b.say}"${b.sayRepeat > 1 ? ` ${b.sayRepeat}번` : ''}` : '', b.bgmId ? `배경음악 ${soundName(b.bgmId)}` : '', (b.volume != null && b.volume !== 100) ? `음량 ${b.volume}%` : ''].filter(Boolean).join(' · ');
-    return `<div class="be-row ${sel ? 'sel' : ''} ${bad ? 'bad' : ''}" data-row="${i}">
+    const col = bellColor(b);
+    return `<div class="be-row ${sel ? 'sel' : ''} ${bad ? 'bad' : ''}" data-row="${i}" style="--bc:${col.c};--bcbg:${col.bg}" title="${h(col.name)}${b.color ? '' : ' (자동)'}">
       <div class="be-lead"><span class="be-grip" draggable="true" data-grip="${i}" title="끌어서 순서 바꾸기 (시각은 제자리)" aria-hidden="true">${I.grip}</span>
       <input type="checkbox" class="be-cb" data-sel="${i}" ${sel ? 'checked' : ''} aria-label="${h(b.time)} ${h(b.label)} 선택"></div>
       <input class="input be-time num" data-b="${i}.time" value="${h(b.time)}" inputmode="numeric" maxlength="5" placeholder="09:00" aria-label="시각 (예: 0940)">
@@ -1199,6 +1201,7 @@ function sheetTtEdit(sh) {
       ${sum ? `<div class="be-sum">${h(sum)}</div>` : ''}
       ${b._open ? `<div class="be-more">
         <div class="acts">
+          <button class="btn sm" data-act="ed-same-prev" data-i="${i}" title="앞에 있는 같은 색 종의 소리·반복·안내 설정을 그대로 가져와요">↑ 앞의 같은 색 종처럼</button>
           <button class="btn sm gold" data-act="tt-say-preview" data-i="${i}" ${b.say ? '' : 'disabled'}>${I.play} 안내만 미리 듣기</button>
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로 옮기기">▲ 위로</button>
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="1" ${i === bells.length - 1 ? 'disabled' : ''} aria-label="아래로 옮기기">▼ 아래로</button>
@@ -1209,6 +1212,9 @@ function sheetTtEdit(sh) {
           ${readClipSet() ? `<button class="btn sm gold" data-act="ed-setpaste" data-i="${i}">설정 붙여넣기</button>` : ''}
           <button class="btn sm danger" data-act="tt-del-bell" data-i="${i}">삭제</button>
         </div>
+        <div class="colorpick"><span class="small bold">색</span>
+          <button class="chip ${!b.color ? 'on' : ''}" data-act="ed-color" data-i="${i}" data-v="">자동 (${h(BELL_COLORS.find(x => x.id === autoColorId(b.label)).name)})</button>
+          ${BELL_COLORS.map(c => `<button class="chip ${b.color === c.id ? 'on' : ''}" data-act="ed-color" data-i="${i}" data-v="${c.id}"><span class="cdot" style="background:${c.c}"></span>${h(c.name)}</button>`).join('')}</div>
         <div class="fields">
           <label class="field full phone-only"><span>안내 문구 (소리 뒤에 읽어줌)</span><input class="input" maxlength="120" data-b="${i}.say" placeholder="예: 점심시간입니다." value="${h(b.say || '')}"></label>
           <label class="field full phone-only bgm-field"><span>안내할 때 깔 배경음악</span><select class="input" data-b="${i}.bgmId">${bgmOptions(b.bgmId)}</select></label>
@@ -1233,6 +1239,8 @@ function sheetTtEdit(sh) {
     ${edToolbar(sh)}
     ${sh.panel === 'bulk' && selList(sh).length ? bulkPanel(sh) : ''}
     ${sh.panel === 'repeat' ? repeatPanel(sh) : ''}
+    <div class="legend">${BELL_COLORS.map(c => { const n = bells.filter(b => bellColor(b).id === c.id).length; return n ? `<button class="lg-chip" data-act="ed-sel-color" data-v="${c.id}" title="${h(c.name)} 종 모두 고르기"><span class="cdot" style="background:${c.c}"></span>${h(c.name)} <b>${n}</b></button>` : ''; }).join('')}
+      <span class="tiny muted">색을 누르면 그 종들이 한꺼번에 골라져요 → [한 번에 바꾸기]</span></div>
     <div class="stack tight">
       <div class="ed-head"><span></span><span style="text-align:center">시각</span><span>이름</span><span>소리 (길이)</span><span>안내 문구</span><span>종 반복</span><span>안내 반복</span><span></span></div>
       ${rows || '<div class="card muted center">종이 없어요. 아래에서 종을 추가하거나 [반복으로 만들기]를 눌러 보세요.</div>'}
@@ -1282,7 +1290,7 @@ function edApplySet(b, s) {
 function edBulkApply(sh) {
   const v = id => (document.getElementById(id) || {}).value;
   const sel = selList(sh);
-  const rp = v('bk-rep'), srp = v('bk-srep');
+  const rp = v('bk-rep'), srp = v('bk-srep'), colv = v('bk-color');
   const sound = v('bk-sound'), vol = v('bk-vol'), say = (v('bk-say') || '').trim(), bgm = v('bk-bgm'), max = v('bk-max');
   const shift = Number(v('bk-shift')) || 0, clearSay = (document.getElementById('bk-clearsay') || {}).checked;
   sel.forEach(i => {
@@ -1290,6 +1298,7 @@ function edBulkApply(sh) {
     if (sound) b.soundId = sound;
     if (vol) b.volume = Number(vol);
     if (rp) b.repeat = Number(rp);
+    if (colv != null && colv !== '__keep') { if (colv) b.color = colv; else delete b.color; }
     if (srp) b.sayRepeat = Number(srp);
     if (clearSay) { b.say = ''; delete b.sayId; } else if (say) { b.say = say; delete b.sayId; }
     if (bgm !== '__keep' && bgm != null) { if (bgm) { b.bgmId = bgm; if (b.bgmVol == null) b.bgmVol = 30; } else { delete b.bgmId; delete b.bgmVol; } }
@@ -1374,21 +1383,58 @@ function sheetDevice(sh) {
   const d = S.devices.find(x => x.id === sh.id);
   if (!d) return '';
   const on = deviceOnline(d);
-  return sheetFrame(d.name || '재생기', `
-    <div class="card stack tight small">
-      <div><span class="dot ${on ? 'ok' : 'off'}"></span> <b>${on ? '정상' : '응답 없음'}</b> · ${ago(millis(d.lastSeen))} 마지막 응답</div>
-      ${d.nextLabel ? `<div class="muted">다음 종: ${h(d.nextLabel)}</div>` : ''}
-      ${d.offsetMs != null ? `<div class="muted">기기 시계 오차: ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 (서버 시간으로 맞춰서 울려요)</div>` : ''}
-      ${d.version ? `<div class="muted">버전 ${h(d.version)}${S.update && cmpVer(S.update.latest, d.version) > 0 ? ` · <b style="color:var(--danger)">새 버전 ${h(S.update.latest)} 있음</b> — 재생기 화면의 [업데이트]를 눌러 주세요` : ''}</div>` : ''}
-      ${d.ua ? `<div class="muted ellipsis">${h(d.ua)}</div>` : ''}
+  const cur = d.display || d.mode;
+  const saver = d.saver || 'night', cycle = d.cycle || 0, vol = d.vol || 100;
+  return sheetFrame(d.name || '재생기', `<div class="dv-grid">
+    <div class="stack">
+      <div class="card stack tight small">
+        <div><span class="dot ${on ? 'ok' : 'off'}"></span> <b>${on ? '정상' : '응답 없음'}</b> · ${ago(millis(d.lastSeen))} 마지막 응답</div>
+        <div class="muted">지금 화면: ${h(styleName(d.mode))}${d.nextLabel ? ` · 다음 종 ${h(d.nextLabel)}` : ''}</div>
+        ${d.offsetMs != null ? `<div class="muted">기기 시계 오차: ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 (서버 시간으로 맞춰서 울려요)</div>` : ''}
+        ${d.version ? `<div class="muted">버전 ${h(d.version)}${S.update && cmpVer(S.update.latest, d.version) > 0 ? ` · <b style="color:var(--danger)">새 버전 ${h(S.update.latest)} 있음</b> — 아래 [새로 고침]을 눌러 주세요` : ''}</div>` : ''}
+        ${d.ua ? `<div class="muted ellipsis">${h(d.ua)}</div>` : ''}
+      </div>
+      <div class="row" style="align-items:flex-end"><label class="field grow"><span>이름</span><input class="input" id="dv-name" maxlength="30" value="${h(d.name || '')}"></label>
+        <button class="btn primary" data-act="device-rename" data-id="${h(d.id)}">저장</button></div>
+      <section class="card stack">
+        <div class="bold">원격 조종</div>
+        <div class="row wrap">
+          <button class="btn" data-act="device-test" data-id="${h(d.id)}">${I.play} 소리 시험</button>
+          <button class="btn" data-act="device-stop" data-id="${h(d.id)}">소리 멈추기</button>
+          <button class="btn" data-act="device-reload" data-id="${h(d.id)}">새로 고침·업데이트</button>
+        </div>
+        <label class="field"><span>재생기 음량 <span id="dv-vol-lab">${vol}%</span></span><input type="range" id="dv-vol" data-id="${h(d.id)}" min="10" max="100" step="5" value="${vol}"></label>
+        <div class="tiny muted">새로 고침 뒤에는 브라우저에 따라 재생기에서 [재생 시작]을 한 번 눌러야 할 수 있어요.</div>
+      </section>
+      <section class="card stack">
+        <div class="row between"><div class="bold">잠금 (학생이 못 건드리게)</div><span class="badge ${d.locked ? 'dark' : ''}">${d.locked ? '잠김' : '꺼짐'}</span></div>
+        <div class="small muted">켜면 재생기의 설정·소리 시험·연결 해제 버튼이 숨고, 비밀번호를 넣어야 3분 동안 풀려요. 종은 그대로 울려요.</div>
+        <div class="row" style="align-items:flex-end"><label class="field grow"><span>비밀번호 (숫자 4~8자리)</span><input class="input num" id="dv-pin" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="${d.pinHash ? '바꾸려면 새로 넣기' : '예: 2580'}"></label>
+          <button class="btn primary" data-act="device-lock" data-id="${h(d.id)}">${d.locked ? '비밀번호 바꾸기' : '잠그기'}</button></div>
+        ${d.locked ? `<button class="btn" data-act="device-unlock" data-id="${h(d.id)}">잠금 끄기</button>` : ''}
+      </section>
+      <button class="btn danger" data-act="device-remove" data-id="${h(d.id)}" style="align-self:flex-start">연결 해제</button>
     </div>
-    <label class="field"><span>이름</span><input class="input" id="dv-name" maxlength="30" value="${h(d.name || '')}"></label>
-    <button class="btn primary block" data-act="device-rename" data-id="${h(d.id)}">이름 저장</button>
-    <div class="field"><span>화면 모양 <span class="muted" style="font-weight:400">· 지금 ${h(styleName(d.mode))}</span></span>
-      <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${(d.display || d.mode) === s.id ? 'on' : ''}" data-act="device-display" data-id="${h(d.id)}" data-v="${s.id}" aria-pressed="${(d.display || d.mode) === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
-      <div class="tiny muted">누르면 재생기 화면이 몇 초 안에 바로 바뀌어요.</div></div>
-    <button class="btn block" data-act="device-test" data-id="${h(d.id)}">이 기기만 소리 시험</button>
-    <button class="btn block danger" data-act="device-remove" data-id="${h(d.id)}">연결 해제</button>`);
+    <div class="stack">
+      <div class="field"><span>화면 모양</span>
+        <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${cur === s.id ? 'on' : ''}" data-act="device-display" data-id="${h(d.id)}" data-v="${s.id}" aria-pressed="${cur === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
+        <div class="tiny muted">누르면 재생기 화면이 몇 초 안에 바로 바뀌어요.</div></div>
+      <div class="field"><span>화면 보호 (모니터가 타지 않게)</span>
+        <div class="chips wrap"><button class="chip ${saver === 'night' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="night">수업 없을 때 화면 보호</button>
+          <button class="chip ${saver === 'off' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="off">항상 고른 화면</button></div>
+        <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${cycle === v ? 'on' : ''}" data-act="device-cycle" data-id="${h(d.id)}" data-v="${v}">${t}</button>`).join('')}</div>
+        <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면, 그리고 종이 없는 날은 검은 화면에 작은 시계가 떠다녀요.
+          모든 화면은 1분마다 몇 픽셀씩 움직여서 같은 자리에 오래 머물지 않아요.</div></div>
+      <details class="card small"><summary class="bold">노트북을 완전히 잠그려면 (키오스크 모드)</summary>
+        <div class="stack tight muted" style="margin-top:8px;line-height:1.7">
+          <div>· <b>Windows</b>: 설정 › 계정 › 기타 사용자 › <b>키오스크 설정</b>(할당된 액세스) → Microsoft Edge로 재생기 주소를 키오스크로 열기</div>
+          <div>· <b>크롬 바로가기</b>: 바탕화면 크롬 바로가기 속성의 대상 끝에 <span class="num">--kiosk --autoplay-policy=no-user-gesture-required</span> 와 재생기 주소를 붙이면 전체 화면으로만 열리고, 켜자마자 소리도 나요</div>
+          <div>· <b>아이패드</b>: 설정 › 손쉬운 사용 › <b>사용법 유도된 접근</b> 켜기 → 재생기에서 홈 버튼(측면 버튼) 세 번</div>
+          <div>· <b>안드로이드 태블릿</b>: 설정 › 보안 › <b>앱 고정</b> 켜기</div>
+          <div>· <b>맥북</b>: 시스템 설정 › 화면 잠금에서 화면 보호기·잠자기를 "안 함"으로, 재생기는 전체 화면으로</div>
+        </div></details>
+    </div>
+  </div>`, { wide: true });
 }
 
 // ── 동작 ─────────────────────────────────────
@@ -1790,6 +1836,25 @@ document.addEventListener('click', async e => {
         sh.sel = new Set(); b._open = true;
         return renderSheet();
       }
+      case 'ed-color': {
+        const b = sh.draft.bells[Number(el.dataset.i)];
+        if (el.dataset.v) b.color = el.dataset.v; else delete b.color;
+        return renderSheet();
+      }
+      case 'ed-sel-color': {
+        sh.sel = new Set(sh.draft.bells.map((b, i) => bellColor(b).id === el.dataset.v ? i : -1).filter(i => i >= 0));
+        sh.panel = 'bulk';
+        renderSheet();
+        return toast(`${BELL_COLORS.find(c => c.id === el.dataset.v).name} 종 ${sh.sel.size}개를 골랐어요`);
+      }
+      case 'ed-same-prev': {
+        const i = Number(el.dataset.i), b = sh.draft.bells[i], cid = bellColor(b).id;
+        let j = i - 1; while (j >= 0 && bellColor(sh.draft.bells[j]).id !== cid) j--;
+        if (j < 0) return toast('앞에 같은 색 종이 없어요');
+        edApplySet(b, edSetFrom(sh.draft.bells[j]));
+        renderSheet();
+        return toast(`${sh.draft.bells[j].time} ${sh.draft.bells[j].label || ''} 설정을 가져왔어요`);
+      }
       case 'ed-copy': return edCopy(sh);
       case 'ed-paste': return edPaste(sh);
       case 'ed-dup': return edDup(sh, selList(sh));
@@ -1903,6 +1968,31 @@ document.addEventListener('click', async e => {
         await F.updateDoc(F.doc(sub('devices'), id), { display: v });
         const d = S.devices.find(x => x.id === id); if (d) d.display = v;
         renderSheet(); return toast(`화면을 "${styleName(v)}"(으)로 바꿨어요`);
+      }
+      case 'device-stop': await sendCommand({ type: 'stop', target: id }); return toast('멈추기 신호를 보냈어요');
+      case 'device-reload': {
+        if (!confirm('이 재생기를 새로 고칠까요? (새 버전이 있으면 업데이트돼요)')) return;
+        await sendCommand({ type: 'reload', target: id }); return toast('새로 고침 신호를 보냈어요');
+      }
+      case 'device-saver': case 'device-cycle': {
+        const patch = act === 'device-saver' ? { saver: el.dataset.v } : { cycle: Number(el.dataset.v) };
+        await F.updateDoc(F.doc(sub('devices'), id), patch);
+        const d = S.devices.find(x => x.id === id); if (d) Object.assign(d, patch);
+        renderSheet(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
+      }
+      case 'device-lock': {
+        const pin = (document.getElementById('dv-pin').value || '').trim();
+        if (!/^\d{4,8}$/.test(pin)) return toast('비밀번호는 숫자 4~8자리로 넣어 주세요');
+        const data = new TextEncoder().encode(`bellkeeper|${id}|${pin}`);
+        const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('');
+        await F.updateDoc(F.doc(sub('devices'), id), { locked: true, pinHash: hash });
+        const d = S.devices.find(x => x.id === id); if (d) Object.assign(d, { locked: true, pinHash: hash });
+        renderSheet(); return toast(`잠갔어요 · 비밀번호 ${pin} 을(를) 꼭 기억해 두세요`);
+      }
+      case 'device-unlock': {
+        await F.updateDoc(F.doc(sub('devices'), id), { locked: false });
+        const d = S.devices.find(x => x.id === id); if (d) d.locked = false;
+        renderSheet(); return toast('잠금을 껐어요');
       }
       case 'device-test': await sendCommand({ type: 'ring', soundId: 'b:dingdong', target: id, label: '소리 시험' }); return toast('소리 시험 신호를 보냈어요');
       case 'device-remove': {
@@ -2124,3 +2214,11 @@ document.addEventListener('mousedown', e => { downOnBack = !!(e.target.classList
 document.addEventListener('click', e => {
   if (e.target.classList && e.target.classList.contains('sheet-back') && !downOnBack) { e.stopImmediatePropagation(); e.preventDefault(); }
 }, true);
+
+// 재생기 음량 (손을 떼면 저장)
+document.addEventListener('input', e => { if (e.target.id === 'dv-vol') { const l = document.getElementById('dv-vol-lab'); if (l) l.textContent = e.target.value + '%'; } });
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'dv-vol') return;
+  const id = e.target.dataset.id, vol = Number(e.target.value);
+  try { await F.updateDoc(F.doc(sub('devices'), id), { vol }); const d = S.devices.find(x => x.id === id); if (d) d.vol = vol; toast(`재생기 음량을 ${vol}%로 바꿨어요`); } catch (err) { fail(err); }
+});
