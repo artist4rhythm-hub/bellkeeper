@@ -7,7 +7,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocFromServer, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
   arrayUnion, arrayRemove, deleteField
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
@@ -33,7 +33,7 @@ export const storage = getStorage(app);
 export {
   GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInAnonymously,
   onAuthStateChanged, signOut,
-  collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocFromServer, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
   onSnapshot, query, where, orderBy, limit, serverTimestamp, Timestamp, writeBatch,
   arrayUnion, arrayRemove, deleteField,
   sRef, uploadBytesResumable, getDownloadURL, deleteObject
@@ -44,7 +44,9 @@ export {
 export async function measureServerOffset(docRef) {
   const t0 = Date.now();
   await setDoc(docRef, { lastSeen: serverTimestamp() }, { merge: true });
-  const snap = await getDoc(docRef);
+  // 저장소(캐시)가 아니라 서버에서 바로 읽어야 서버 시각이 들어 있어요
+  let snap;
+  try { snap = await getDocFromServer(docRef); } catch (e) { snap = await getDoc(docRef); }
   const t1 = Date.now();
   const ts = snap.get('lastSeen');
   if (!ts || typeof ts.toMillis !== 'function') return null;

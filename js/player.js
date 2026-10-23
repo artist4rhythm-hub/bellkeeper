@@ -39,6 +39,35 @@ const now = () => Date.now() + P.offset;
 const tz = () => (P.space && P.space.timezone) || 'Asia/Seoul';
 // 이 재생기가 속한 재생 그룹 기준으로 일정 계산
 const ctx = () => schedCtx(P.group, P.groups);
+const realGroups = () => (P.groups || []).filter(g => g.id !== '_base').sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+const baseGroupName = () => ((P.groups || []).find(g => g.id === '_base') || {}).name || '공통';
+const myGroupId = () => (P.group && realGroups().some(g => g.id === P.group)) ? P.group : '_base';
+const groupNameOf = id => id === '_base' ? baseGroupName() : ((realGroups().find(g => g.id === id) || {}).name || baseGroupName());
+// 재생 그룹 고르기 버튼들 (설정 화면·재생 시작 화면 공용)
+function groupPickerHtml() {
+  const key = todayKey(now(), tz());
+  const ids = ['_base', ...realGroups().map(g => g.id)];
+  const cur = myGroupId();
+  return `<div class="grp-pick">${ids.map(id => {
+    const g = realGroups().find(x => x.id === id) || (P.groups || []).find(x => x.id === '_base') || {};
+    const day = P.space ? bellsForDay(key, P.rules, P.timetables, tz(), schedCtx(id, P.groups)) : null;
+    return `<button class="${cur === id ? 'on' : ''}" data-pl="group" data-v="${h(id)}" aria-pressed="${cur === id}">
+      <span class="gp-sw" style="background:${h(g.color || '#6B7671')}"></span>
+      <span class="grow"><b>${h(groupNameOf(id))}</b><span class="tiny muted">오늘 ${day && day.tt ? h(day.tt.name) : '종 없음'}</span></span>
+      ${cur === id ? '<span class="tiny bold">✓ 사용 중</span>' : ''}</button>`;
+  }).join('')}</div>`;
+}
+async function setGroup(id) {
+  const v = id === '_base' ? '' : id;
+  P.group = v; recompute();
+  try { await F.updateDoc(myDoc(), { group: v }); }
+  catch (e) { console.warn(e); alert('재생 그룹을 저장하지 못했어요. 인터넷 연결을 확인하거나, 관리자 화면 › 기기에서 바꿔 주세요.'); }
+}
+function fillGateGroups() {
+  const box = document.getElementById('gate-grp');
+  if (!box) return;
+  box.innerHTML = realGroups().length ? `<div class="small bold" style="text-align:left">이 재생기의 재생 그룹</div>${groupPickerHtml()}` : '';
+}
 const soundsById = () => Object.fromEntries(P.sounds.map(s => [s.id, s]));
 const myDoc = () => F.doc(F.db, 'spaces', P.saved.spaceId, 'devices', P.uid);
 const sub = n => F.collection(F.db, 'spaces', P.saved.spaceId, n);
@@ -93,7 +122,8 @@ async function connect() {
     if (pc.expiresAt && pc.expiresAt.toMillis() < Date.now() - 60000) throw new Error('expired');
     await F.setDoc(F.doc(F.db, 'spaces', pc.spaceId, 'devices', P.uid), {
       name: name.slice(0, 30), code, pairedAt: F.serverTimestamp(), lastSeen: F.serverTimestamp(),
-      status: 'waiting', ua: navigator.userAgent.slice(0, 160), version: APP_VERSION
+      status: 'waiting', ua: navigator.userAgent.slice(0, 160), version: APP_VERSION,
+      ...(pc.group ? { group: pc.group } : {})
     });
     P.saved = { spaceId: pc.spaceId, name };
     localStorage.setItem(LS_KEY, JSON.stringify(P.saved));
@@ -111,18 +141,21 @@ async function connect() {
 // ── 재생 시작 화면 (소리를 내려면 한 번 눌러야 해요) ─────────────
 function showGate() {
   gate.classList.remove('hidden');
+  gate.dataset.kind = 'start';
   gate.innerHTML = `<div class="card stack loose center">
     <div style="color:var(--ink);display:flex;justify-content:center">${LOGO}</div>
     <div class="bold" style="font-size:22px">${h((P.space && P.space.name) || '벨키퍼')} · ${h(P.saved.name || '재생기')}</div>
     <div class="muted">브라우저가 소리를 낼 수 있도록 아래 버튼을 한 번 눌러주세요.</div>
+    <div id="gate-grp" class="stack tight"></div>
     <button class="btn gold lg block" id="gate-go" style="min-height:64px;font-size:20px">재생 시작</button>
     <div class="tiny muted">화면을 켜 둔 채로 두세요. 이 기기를 껐다 켜면 다시 한 번 눌러야 해요.</div>
   </div>`;
+  fillGateGroups();
   const go = async () => {
     await unlockAudio();
     await keepAwake();
     try { if (document.documentElement.requestFullscreen && matchMedia('(pointer:coarse)').matches) await document.documentElement.requestFullscreen(); } catch (e) { /* 무시 */ }
-    gate.classList.add('hidden');
+    gate.classList.add('hidden'); gate.dataset.kind = '';
     P.started = true;
     heartbeat();
     draw();
@@ -192,17 +225,25 @@ function startRunning() {
     if (changed('vol') && Number.isFinite(x.vol)) { P.opt.vol = Math.max(10, Math.min(100, x.vol)); }
     saveOpt();
     P.logSince = x.logSince || ''; P.devLoaded = true;
-    if ((x.group || '') !== (P.group || '')) { P.group = x.group || ''; recompute(); }
+    if ((x.group || '') !== (P.group || '')) { P.group = x.group || ''; recompute(); if (gate.dataset.kind === 'start') fillGateGroups(); if (gate.dataset.kind === 'menu') drawMenu(); }
     const lockNow = !!x.locked && !!x.pinHash;
     if (lockNow !== P.locked || (x.pinHash || '') !== P.pinHash) { P.locked = lockNow; P.pinHash = x.pinHash || ''; P.unlockedUntil = 0; redraw = true; if (!P.locked && gate.dataset.kind === 'pin') gate.classList.add('hidden'); }
     if (redraw) draw();
   }, onErr));
-  P.unsub.push(F.onSnapshot(F.doc(F.db, 'spaces', P.saved.spaceId), d => {
-    if (d.exists()) { P.space = { id: d.id, ...d.data() }; P.fromCache = d.metadata.fromCache; recompute(); }
+  // 인터넷 연결 표시: 서버와 연결됐는지(메타데이터)가 바뀔 때도 알려 달라고 해야 정확해요
+  P.unsub.push(F.onSnapshot(F.doc(F.db, 'spaces', P.saved.spaceId), { includeMetadataChanges: true }, d => {
+    const was = P.fromCache;
+    P.fromCache = d.metadata.fromCache;
+    if (d.exists()) { const nx = { id: d.id, ...d.data() }; if (JSON.stringify(nx) !== JSON.stringify(P.space)) { P.space = nx; recompute(); return; } }
+    if (was !== P.fromCache) draw();
   }, onErr));
   P.unsub.push(F.onSnapshot(sub('timetables'), q => { P.timetables = q.docs.map(d => ({ id: d.id, ...d.data(), bells: cleanBells(d.data().bells) })); recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(sub('rules'), q => { P.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
-  P.unsub.push(F.onSnapshot(sub('groups'), q => { P.groups = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, e => console.warn(e)));
+  P.unsub.push(F.onSnapshot(sub('groups'), q => {
+    P.groups = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
+    if (gate.dataset.kind === 'start') fillGateGroups();
+    if (gate.dataset.kind === 'menu' && !document.activeElement.closest('.set-page select')) drawMenu();
+  }, e => console.warn(e)));
   P.unsub.push(F.onSnapshot(sub('sounds'), q => {
     P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
     if (!P.corsProbed) { const f = P.sounds.find(s => s.url); if (f) { P.corsProbed = true; probeCors(f.url); } }
@@ -388,7 +429,7 @@ function draw() {
       <button class="btn" data-pl="test">소리 시험</button>
       <button class="btn" data-pl="menu">설정</button>`}
     </div>`;
-  const head = `<div class="pl-top"><div class="row pl-name">${LOGO}<span class="ellipsis">${h(P.space.name)} · ${h(P.saved.name || '재생기')}</span></div>
+  const head = `<div class="pl-top"><div class="row pl-name">${LOGO}<span class="ellipsis">${h(P.space.name)} · ${h(P.saved.name || '재생기')}${realGroups().length ? ` · <span class="pl-grp">${h(groupNameOf(myGroupId()))}</span>` : ''}</span></div>
       ${['dark', 'period', 'analog2'].includes(mode) ? `<div class="bold num" style="font-size:22px">${clock.hm}</div>` : `<div class="row status-ok" style="gap:8px"><span class="dot ok"></span>재생 중</div>`}</div>`;
 
   const big = bigDate(clock.z);
@@ -648,7 +689,10 @@ const SAMPLE_Z = { h: 10, mi: 9, s: 32, y: 2026, m: 10, d: 23, dow: 5 };
 function drawMenu() {
   const o = P.opt;
   const pvSize = P.pvSize || 'tv';
-  const mainHtml = `<section class="set-card wide"><h4>화면 모양</h4>
+  const mainHtml = `<section class="set-card wide"><h4>재생 그룹 <span class="tiny muted">이 재생기가 어떤 요일별 일과표로 울릴지 골라요${realGroups().length ? '' : ' · 관리자 화면 › 재생 그룹에서 1학년·2학년 같은 그룹을 만들면 여기에 나와요'}</span></h4>
+          ${groupPickerHtml()}
+        </section>
+        <section class="set-card wide"><h4>화면 모양</h4>
           <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${P.mode === s.id ? 'on' : ''}" data-pl="mode" data-v="${s.id}" data-pv="mode" aria-pressed="${P.mode === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
         </section>
         <section class="set-card"><h4>시계판 디자인 <span class="tiny muted">F·G·K 아날로그 화면</span></h4>
@@ -811,7 +855,7 @@ document.addEventListener('click', async e => {
   if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'pvsize') { P.pvSize = b.dataset.v; drawMenu(); mountPreview(); return; }
-  if (isLocked() && ['test', 'menu', 'update', 'unlink', 'mode', 'fullscreen'].includes(a)) return openPin(a === 'menu' ? 'menu' : '');
+  if (isLocked() && ['test', 'menu', 'update', 'unlink', 'mode', 'fullscreen', 'group'].includes(a)) return openPin(a === 'menu' ? 'menu' : '');
   if (a === 'test') { await unlockAudio(); ring({ soundId: 'b:dingdong', label: '소리 시험', volume: 100 }); }
   if (a === 'voice-test') {
     const uri = document.getElementById('pl-voice').value, rate = Number(document.getElementById('pl-rate').value) || 1;
@@ -820,6 +864,7 @@ document.addEventListener('click', async e => {
     speak('안녕하세요. 벨키퍼 안내 방송입니다.', 100, { uri, rate });
   }
   if (a === 'menu') openMenu();
+  if (a === 'group') { await setGroup(b.dataset.v); if (gate.dataset.kind === 'menu') { drawMenu(); mountPreview(); } else fillGateGroups(); return; }
   if (a === 'update') {
     if (!confirm('새 버전으로 업데이트할까요? 업데이트 뒤 [재생 시작]을 한 번 눌러 주세요.')) return;
     P.allowLeave = true;

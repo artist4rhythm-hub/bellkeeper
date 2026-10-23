@@ -507,7 +507,7 @@ function viewToday() {
       ${S.groups.length ? `<section class="card stack">
         <div class="row between"><span class="card-title">그룹별 오늘</span><button class="btn sm ghost" data-act="tab" data-id="monitor">종합 관제 →</button></div>
         <div class="gp-today">${allGroupIds().map(g => { const dd = bellsForDay(key, S.rules, S.timetables, tz(), schedCtx(g, S.groups)); const n = S.devices.filter(d => devGroup(d) === g).length;
-          return `<div><span class="gp-dot" style="background:${g === BASE_GROUP ? '#6B7671' : h(groupColor(g))}"></span><b>${h(groupName(g))}</b><span class="tiny muted">${n}대</span><span class="grow"></span>${ttChip(dd.ttId)}</div>`; }).join('')}</div>
+          return `<div><span class="gp-dot" style="background:${h(groupColor(g))}"></span><b>${h(groupName(g))}</b><span class="tiny muted">${n}대</span><span class="grow"></span>${ttChip(dd.ttId)}</div>`; }).join('')}</div>
       </section>` : ''}
       ${ex.length ? `<section class="card stack">
         <span class="card-title">다가오는 예외</span>
@@ -556,7 +556,7 @@ function viewCalendar() {
   const rules = sortRules(S.rules);
   return `<div class="cols">
   <div class="card stack c-main">
-    ${S.groups.length ? `<div class="seg wrap cal-groups" role="tablist">${allGroupIds().map(g => `<button class="${S.calGroup === g ? 'on' : ''}" data-act="cal-group" data-id="${h(g)}">${g !== BASE_GROUP ? `<span class="gp-dot" style="background:${h(groupColor(g))}"></span>` : ''}${h(groupName(g))}</button>`).join('')}</div>` : ''}
+    ${S.groups.length ? `<div class="seg wrap cal-groups" role="tablist">${allGroupIds().map(g => `<button class="${S.calGroup === g ? 'on' : ''}" data-act="cal-group" data-id="${h(g)}"><span class="gp-dot" style="background:${h(groupColor(g))}"></span>${h(groupName(g))}</button>`).join('')}</div>` : ''}
     <div class="cal-head">
       <button class="icon-btn" data-act="cal-move" data-d="-1" aria-label="이전 달">${I.left}</button>
       <div class="bold" style="font-size:18px">${y}년 ${m}월${S.groups.length ? ` <span class="small muted" style="font-weight:500">· ${h(groupName(S.calGroup))} 기준</span>` : ''}</div>
@@ -626,7 +626,8 @@ function groupName(gid) {
   return g ? g.name : baseName();
 }
 function groupColor(gid) {
-  const g = gid && S.groups.find(x => x.id === gid);
+  if (!gid || gid === BASE_GROUP) return (S.baseGroup && S.baseGroup.color) || '#6B7671';
+  const g = S.groups.find(x => x.id === gid);
   return (g && g.color) || '#6B7671';
 }
 const devGroup = d => (d.group && S.groups.some(g => g.id === d.group)) ? d.group : BASE_GROUP;
@@ -676,7 +677,7 @@ function viewGroups() {
     }).join('');
     const list = devs(gid);
     return `<tr>
-      <td class="gp-name"><div class="row" style="gap:8px"><span class="gp-dot" style="background:${isBase ? '#6B7671' : h(groupColor(gid))}"></span><b>${h(name)}</b>${isBase ? '<span class="badge">기본</span>' : ''}</div>
+      <td class="gp-name"><div class="row" style="gap:8px"><span class="gp-dot" style="background:${h(groupColor(gid))}"></span><b>${h(name)}</b>${isBase ? '<span class="badge">기본</span>' : ''}</div>
         <div class="tiny muted">재생기 ${list.length}대${list.length ? ' · ' + list.slice(0, 3).map(d => h(d.name || '재생기')).join(', ') + (list.length > 3 ? ' …' : '') : ''}</div></td>
       ${cells}
       <td class="right"><button class="btn sm" data-act="${isBase ? 'group-base' : 'group-edit'}" data-id="${h(gid)}">편집</button></td></tr>`;
@@ -717,35 +718,46 @@ function sheetGroup(sh) {
   const bdays = (base && base.days) || {};
   const DOWS = [1, 2, 3, 4, 5, 6, 0];
   const isBase = g.id === BASE_GROUP;
-  return sheetFrame(isBase ? `${baseName()} (기본)` : (g.id ? '그룹 고치기' : '새 그룹'), `
-    <label class="field"><span>이름</span><input class="input" data-g="name" maxlength="20" placeholder="예: 1학년" value="${h(g.name || '')}" ${g.id ? '' : 'autofocus'}></label>
-    ${isBase ? `<div class="card stack tight small"><div>요일별 일과표는 달력의 <b>기간 규칙</b>이에요.</div>
-        <div class="row wrap" style="gap:6px">${DOWS.map(d => `<span class="muted">${DOW_LABELS[d]}</span>${ttChip(bdays[d] === undefined ? '' : bdays[d])}`).join('')}</div>
-        ${base ? `<button class="btn" data-act="rule-edit" data-id="${h(base.id)}">기간 규칙 고치기</button>` : '<button class="btn" data-act="rule-new-period">기간 규칙 만들기</button>'}</div>`
-    : `<div class="field"><span>색</span><div class="chips">${GROUP_COLORS.map(c => `<button class="chip color-dot ${g.color === c ? 'on' : ''}" data-act="group-color" data-id="${c}" aria-label="색 ${c}"><span style="background:${c}"></span></button>`).join('')}</div></div>
-    <div class="field"><span>요일별 일과표 <span class="muted" style="font-weight:400">· "${h(baseName())} 따름"은 기본 설정을 그대로 써요</span></span>
-      <div class="gp-days">${DOWS.map(d => {
-        const v = (g.days || {})[d];
-        const val = v === undefined || v === null ? '_inherit' : v;
-        return `<label class="${val !== '_inherit' ? 'set' : ''}"><b>${DOW_LABELS[d]}</b>
-          <select data-gd="${d}"><option value="_inherit" ${val === '_inherit' ? 'selected' : ''}>${h(baseName())} 따름${bdays[d] ? ` (${h(ttShort((ttById(bdays[d]) || {}).name || ''))})` : ''}</option>${ttOptions(val === '_inherit' ? null : val)}</select></label>`;
-      }).join('')}</div></div>`}
-    <div class="field"><span>이 그룹 재생기</span>
-      ${S.devices.length ? `<div class="gp-devs">${sortedDevices().map(d => {
-        const on = g.devs.has(d.id), other = devGroup(d);
-        return `<label class="${on ? 'on' : ''}"><input type="checkbox" data-gdev="${h(d.id)}" ${on ? 'checked' : ''}><span class="dot ${deviceOnline(d) ? 'ok' : 'off'}"></span><span class="grow">${h(d.name || '재생기')}</span>
-          ${!on && other !== (g.id || '') ? `<span class="tiny muted">${h(groupName(other))}</span>` : ''}</label>`;
-      }).join('')}</div>` : '<div class="small muted">아직 연결된 재생기가 없어요</div>'}
-      ${isBase ? '<div class="tiny muted">여기에 체크하면 다른 그룹에서 빠지고 기본으로 울려요.</div>' : ''}</div>
-    <button class="btn primary lg block" data-act="group-save">저장</button>
-    ${g.id && !isBase ? `<button class="btn block danger" data-act="group-del" data-id="${h(g.id)}">이 그룹 지우기</button>` : ''}`);
+  const baseTt = d => bdays[d] ? ttShort((ttById(bdays[d]) || {}).name || '') : '종 없음';
+  return sheetFrame(isBase ? `${g.name || baseName()} (기본 그룹)` : (g.id ? '그룹 고치기' : '새 그룹'), `<div class="gp-sheet">
+    <div class="stack">
+      <label class="field"><span>이름</span><input class="input" data-g="name" maxlength="20" placeholder="${isBase ? '예: 초등부 공통' : '예: 1학년'}" value="${h(g.name || '')}" ${g.id ? '' : 'autofocus'}></label>
+      <div class="field"><span>색</span><div class="chips wrap">${GROUP_COLORS.map(c => `<button class="chip color-dot ${g.color === c ? 'on' : ''}" data-act="group-color" data-id="${c}" aria-label="색 ${c}"><span style="background:${c}"></span></button>`).join('')}</div></div>
+      <div class="field"><span>요일별 일과표 <span class="muted" style="font-weight:400">· ${isBase ? '그룹에 안 넣은 재생기, 그리고 다른 그룹이 비워 둔 요일이 이대로 울려요' : `"${h(baseName())} 따름"은 기본 그룹 설정을 그대로 써요`}</span></span>
+        <div class="gp-days">${DOWS.map(d => {
+          const v = (g.days || {})[d];
+          if (isBase) {
+            const val = v === undefined || v === null ? '' : v;
+            return `<label class="${val ? 'set' : ''}"><b>${DOW_LABELS[d]}</b><select data-gd="${d}">${ttOptions(val)}</select></label>`;
+          }
+          const val = v === undefined || v === null ? '_inherit' : v;
+          return `<label class="${val !== '_inherit' ? 'set' : ''}"><b>${DOW_LABELS[d]}</b>
+            <select data-gd="${d}"><option value="_inherit" ${val === '_inherit' ? 'selected' : ''}>${h(baseName())} 따름 (${h(baseTt(d))})</option>${ttOptions(val === '_inherit' ? null : val)}</select></label>`;
+        }).join('')}</div>
+        ${isBase ? `<div class="tiny muted">${base ? `달력의 기간 규칙 "${h(base.name || '기본')}" (${shortDate(base.start)}~${shortDate(base.end)})에 함께 저장돼요. 기간은 [달력]에서 바꿀 수 있어요.` : '저장하면 오늘부터 1년 동안의 기간 규칙이 만들어져요.'}</div>` : ''}</div>
+    </div>
+    <div class="stack">
+      <div class="field"><span>이 그룹 재생기 <span class="muted" style="font-weight:400">· ${g.devs.size}대</span></span>
+        ${S.devices.length ? `<div class="gp-devs">${sortedDevices().map(d => {
+          const on = g.devs.has(d.id), other = devGroup(d);
+          return `<label class="${on ? 'on' : ''}"><input type="checkbox" data-gdev="${h(d.id)}" ${on ? 'checked' : ''}><span class="dot ${deviceOnline(d) ? 'ok' : 'off'}"></span><span class="grow">${h(d.name || '재생기')}</span>
+            ${!on && other !== (g.id || '') ? `<span class="tiny muted">${h(groupName(other))}</span>` : ''}</label>`;
+        }).join('')}</div>` : '<div class="small muted">아직 연결된 재생기가 없어요. [기기]에서 연결 번호를 만들 때 그룹을 골라 둘 수도 있어요.</div>'}
+        <div class="tiny muted">${isBase ? '체크하면 다른 그룹에서 빠져서 이 기본 그룹으로 울려요.' : '체크를 풀면 그 재생기는 기본 그룹으로 돌아가요.'} 재생기 화면의 [설정]에서도 고를 수 있어요.</div></div>
+      <button class="btn primary lg block" data-act="group-save">저장</button>
+      ${g.id && !isBase ? `<button class="btn block danger" data-act="group-del" data-id="${h(g.id)}">이 그룹 지우기</button>` : ''}
+      ${isBase ? '<div class="tiny muted">기본 그룹은 지울 수 없어요. 그룹이 하나도 없으면 모든 재생기가 기본 그룹으로 울려요.</div>' : ''}
+    </div></div>`, { wide: true });
 }
 function openGroup(gid) {
   if (gid === BASE_GROUP) {
-    return openSheet({ type: 'group', draft: { id: BASE_GROUP, name: baseName(), devs: new Set(S.devices.filter(d => devGroup(d) === BASE_GROUP).map(d => d.id)) } });
+    const base = activeBaseRule();
+    const days = {};
+    for (const d of [0, 1, 2, 3, 4, 5, 6]) { const v = ((base && base.days) || {})[d]; days[d] = v && v !== '_inherit' ? v : ''; }
+    return openSheet({ type: 'group', draft: { id: BASE_GROUP, name: baseName(), color: groupColor(BASE_GROUP), days, ruleId: base ? base.id : null, devs: new Set(S.devices.filter(d => devGroup(d) === BASE_GROUP).map(d => d.id)) } });
   }
   const g = gid ? S.groups.find(x => x.id === gid) : null;
-  const used = new Set(S.groups.map(x => x.color));
+  const used = new Set([...S.groups.map(x => x.color), groupColor(BASE_GROUP)]);
   openSheet({ type: 'group', draft: g
     ? { id: g.id, name: g.name, color: g.color || GROUP_COLORS[0], days: { ...(g.days || {}) }, devs: new Set(S.devices.filter(d => d.group === g.id).map(d => d.id)) }
     : { id: null, name: '', color: GROUP_COLORS.find(c => !used.has(c)) || GROUP_COLORS[0], days: {}, devs: new Set() } });
@@ -757,7 +769,16 @@ async function saveGroup() {
   try {
     let gid = g.id;
     if (gid === BASE_GROUP) {
-      await F.setDoc(F.doc(sub('groups'), BASE_GROUP), { name, order: -1, updatedAt: F.serverTimestamp() }, { merge: true });
+      await F.setDoc(F.doc(sub('groups'), BASE_GROUP), { name, color: g.color || '#6B7671', order: -1, updatedAt: F.serverTimestamp() }, { merge: true });
+      const days = {};
+      for (const d of [0, 1, 2, 3, 4, 5, 6]) days[d] = (g.days || {})[d] || '';
+      const rule = g.ruleId && S.rules.find(r => r.id === g.ruleId);
+      if (rule) {
+        if (JSON.stringify(days) !== JSON.stringify(Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map(d => [d, (rule.days || {})[d] || ''])))) await F.updateDoc(F.doc(sub('rules'), rule.id), { days, by: S.user.uid });
+      } else {
+        const t = todayKey(Date.now(), tz());
+        await F.addDoc(sub('rules'), { kind: 'period', name: '기본', start: t, end: addDays(t, 364), days, by: S.user.uid, createdAt: F.serverTimestamp() });
+      }
     } else {
       const days = {};
       for (const d of [0, 1, 2, 3, 4, 5, 6]) { const v = (g.days || {})[d]; if (v !== undefined && v !== null && v !== '_inherit') days[d] = v; }
@@ -926,7 +947,7 @@ function monLegend() {
     <span><b class="st-ok">✓</b> 다 울림</span><span><b class="st-miss">!</b> 놓친 종</span><span><b class="muted">·</b> 기록 없음</span></div>`;
 }
 function groupHeader(gid, cols) {
-  return `<tr class="mon-grp"><td colspan="${cols}"><span class="gp-dot" style="background:${gid === BASE_GROUP ? '#6B7671' : h(groupColor(gid))}"></span>${h(groupName(gid))}</td></tr>`;
+  return `<tr class="mon-grp"><td colspan="${cols}"><span class="gp-dot" style="background:${h(groupColor(gid))}"></span>${h(groupName(gid))}</td></tr>`;
 }
 function devCell(d) {
   const s = devStatus(d);
@@ -950,7 +971,7 @@ function monitorToday(now, key) {
   let lastG = null;
   for (const { d, day } of list) {
     const g = devGroup(d);
-    if (g !== lastG) { rows.push(`<div class="tl-grp"><span class="gp-dot" style="background:${g === BASE_GROUP ? '#6B7671' : h(groupColor(g))}"></span>${h(groupName(g))}</div>`); lastG = g; }
+    if (g !== lastG) { rows.push(`<div class="tl-grp"><span class="gp-dot" style="background:${h(groupColor(g))}"></span>${h(groupName(g))}</div>`); lastG = g; }
     const c = ttColor(day.ttId);
     const s = devStatus(d);
     const ticks = day.bells.map(b => {
@@ -1023,7 +1044,7 @@ function sheetMonDay(sh) {
   const label = { ok: '울림', miss: '놓침', future: '예정', wait: '확인 중', unknown: '기록 없음' };
   return sheetFrame(`${d.name || '재생기'} · ${koreanDate(sh.key)}`, `
     <div class="card stack tight">
-      <div class="row wrap" style="gap:8px"><span class="gp-dot" style="background:${devGroup(d) === BASE_GROUP ? '#6B7671' : h(groupColor(devGroup(d)))}"></span><b>${h(groupName(devGroup(d)))}</b>${ttChip(info.day.ttId)}</div>
+      <div class="row wrap" style="gap:8px"><span class="gp-dot" style="background:${h(groupColor(devGroup(d)))}"></span><b>${h(groupName(devGroup(d)))}</b>${ttChip(info.day.ttId)}</div>
       <div class="small muted">${h(srcLabel(info.day))}</div>
       ${sh.key <= today && info.day.bells.length ? `<div class="small">${info.ok}개 울림${info.miss ? ` · <b style="color:var(--danger)">${info.miss}개 놓침</b>` : ''}${info.unknown ? ` · 기록 없음 ${info.unknown}개` : ''}</div>` : ''}
     </div>
@@ -1139,6 +1160,9 @@ function viewDevices() {
   </div></div>
   <section class="card dark stack c-side">
     <div class="bold" style="font-size:16px">재생기 추가</div>
+    ${S.groups.length ? `<div class="stack tight"><div class="small muted">연결하면 들어갈 재생 그룹</div>
+      <div class="chips wrap">${allGroupIds().map(g => `<button class="chip ${(S.pairGroup || BASE_GROUP) === g ? 'on' : ''}" data-act="pair-group" data-id="${h(g)}"><span class="gp-dot" style="background:${h(groupColor(g))}"></span>${h(groupName(g))}</button>`).join('')}</div>
+      <div class="tiny muted">재생기 화면의 [설정]이나 여기 [기기] › 재생기에서도 나중에 바꿀 수 있어요.</div></div>` : ''}
     ${p ? `
       <div class="code-boxes num" aria-label="연결 번호 ${p.code}">${p.code.slice(0, 3).split('').map(c => `<span>${c}</span>`).join('')}<span class="gap"></span>${p.code.slice(3).split('').map(c => `<span>${c}</span>`).join('')}</div>
       <div class="qr" id="qr"></div>
@@ -1170,9 +1194,10 @@ async function newPairCode() {
     const expiresAt = Date.now() + 10 * 60 * 1000;
     try {
       await F.setDoc(F.doc(F.db, 'pairCodes', code), {
-        spaceId: S.spaceId, createdBy: S.user.uid, createdAt: F.serverTimestamp(), expiresAt: F.Timestamp.fromMillis(expiresAt)
+        spaceId: S.spaceId, createdBy: S.user.uid, createdAt: F.serverTimestamp(), expiresAt: F.Timestamp.fromMillis(expiresAt),
+        ...(S.pairGroup && S.pairGroup !== BASE_GROUP && S.groups.some(g => g.id === S.pairGroup) ? { group: S.pairGroup } : {})
       });
-      S.pair = { code, expiresAt };
+      S.pair = { code, expiresAt, group: S.pairGroup || BASE_GROUP };
       render();
       return;
     } catch (e) { if (i === 3) fail(e, '연결 번호를 만들지 못했어요'); }
@@ -1429,7 +1454,7 @@ function sheetDate(sh) {
   const rows = gids.map(g => {
     const day = bellsForDay(key, S.rules, S.timetables, tz(), schedCtx(g, S.groups));
     const n = S.devices.filter(d => devGroup(d) === g).length;
-    return `<div class="item static"><span class="gp-dot" style="background:${g === BASE_GROUP ? '#6B7671' : h(groupColor(g))}"></span>
+    return `<div class="item static"><span class="gp-dot" style="background:${h(groupColor(g))}"></span>
       <div class="grow"><div class="bold">${h(groupName(g))} <span class="tiny muted">재생기 ${n}대</span></div><div class="tiny muted">${h(srcLabel(day))}${day.bells.length ? ` · 종 ${day.bells.length}개` : ''}</div></div>${ttChip(day.ttId)}</div>`;
   }).join('');
   const sel = sh.groups || [];
@@ -1895,7 +1920,7 @@ function sheetDevice(sh) {
         <button class="btn primary" data-act="device-rename" data-id="${h(d.id)}">저장</button></div>
       <section class="card stack">
         <div class="row between"><div class="bold">재생 그룹</div><button class="btn sm ghost" data-act="tab" data-id="groups">그룹 관리 →</button></div>
-        <div class="chips wrap">${allGroupIds().map(g => `<button class="chip ${devGroup(d) === g ? 'on' : ''}" data-act="device-group" data-id="${h(d.id)}" data-v="${h(g)}">${g !== BASE_GROUP ? `<span class="gp-dot" style="background:${h(groupColor(g))}"></span>` : ''}${h(groupName(g))}</button>`).join('')}</div>
+        <div class="chips wrap">${allGroupIds().map(g => `<button class="chip ${devGroup(d) === g ? 'on' : ''}" data-act="device-group" data-id="${h(d.id)}" data-v="${h(g)}"><span class="gp-dot" style="background:${h(groupColor(g))}"></span>${h(groupName(g))}</button>`).join('')}</div>
         <div class="tiny muted">이 재생기가 울릴 요일별 일과표를 정해요.${S.groups.length ? '' : ' [재생 그룹]에서 1학년·2학년 같은 그룹을 만들 수 있어요.'}
           오늘: ${(() => { const dd = bellsForDay(todayKey(Date.now(), tz()), S.rules, S.timetables, tz(), devCtx(d)); return `${dd.tt ? h(dd.tt.name) : '종 없음'} (${h(srcLabel(dd))})`; })()}</div>
       </section>
@@ -2523,6 +2548,7 @@ document.addEventListener('click', async e => {
         renderSheet(); return toast(`'${groupName(el.dataset.v)}' 그룹으로 옮겼어요 · 몇 초 안에 반영돼요`);
       }
       case 'pair-new': return newPairCode();
+      case 'pair-group': { S.pairGroup = id; if (S.pair && S.pair.expiresAt > Date.now()) return newPairCode(); return render(); }
       case 'device': return openSheet({ type: 'device', id });
       case 'device-rename': {
         const name = document.getElementById('dv-name').value.trim();
@@ -2604,8 +2630,11 @@ document.addEventListener('input', e => {
   }
   if (sh.type === 'group') {
     if (t.dataset.g) sh.draft[t.dataset.g] = t.value;
-    if (t.dataset.gd != null) { sh.draft.days = sh.draft.days || {}; sh.draft.days[t.dataset.gd] = t.value; const L = t.closest('label'); if (L) L.classList.toggle('set', t.value !== '_inherit'); }
-    if (t.dataset.gdev) { t.checked ? sh.draft.devs.add(t.dataset.gdev) : sh.draft.devs.delete(t.dataset.gdev); const L = t.closest('label'); if (L) L.classList.toggle('on', t.checked); }
+    if (t.dataset.gd != null) { sh.draft.days = sh.draft.days || {}; sh.draft.days[t.dataset.gd] = t.value; const L = t.closest('label'); if (L) L.classList.toggle('set', sh.draft.id === BASE_GROUP ? !!t.value : t.value !== '_inherit'); }
+    if (t.dataset.gdev) {
+      if (sh.draft.id === BASE_GROUP && !t.checked && S.devices.some(d => d.id === t.dataset.gdev && devGroup(d) === BASE_GROUP)) { t.checked = true; toast('기본 그룹에서 빼려면 그 재생기를 다른 그룹에 넣어 주세요'); return; }
+      t.checked ? sh.draft.devs.add(t.dataset.gdev) : sh.draft.devs.delete(t.dataset.gdev); const L = t.closest('label'); if (L) L.classList.toggle('on', t.checked);
+    }
   }
   if (sh.type === 'rule') {
     if (t.dataset.rCb) { sh.draft[t.dataset.rCb] = t.checked; return; }
