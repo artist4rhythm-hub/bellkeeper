@@ -1,8 +1,8 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, HGS } from './core.js';
-import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS } from './core.js';
+import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
@@ -31,7 +31,7 @@ const P = {
   mode: validMode(localStorage.getItem(LS_MODE)),
   upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null,
   // 화면 보호·음량·잠금 (관리자가 원격으로 바꾸면 그대로 따름)
-  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
+  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', dcol: 'auto', dsec: 'auto', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
   locked: false, pinHash: '', unlockedUntil: 0, seen: {}
 };
 function saveOpt() { if (PREVIEW) return; try { localStorage.setItem(LS_OPT, JSON.stringify(P.opt)); } catch (e) { /* 무시 */ } }
@@ -221,6 +221,8 @@ function startRunning() {
     if (changed('abg') && ABGS.some(f => f.id === x.abg)) { P.opt.abg = x.abg; redraw = true; }
     if (changed('art') && INK_ARTS.some(f => f.id === x.art)) { P.opt.art = x.art; redraw = true; }
     if (changed('digi') && DIGIS.includes(x.digi)) { P.opt.digi = x.digi; redraw = true; }
+    if (changed('dcol') && DCOLS.includes(x.dcol)) { P.opt.dcol = x.dcol; redraw = true; }
+    if (changed('dsec') && DSECS.includes(x.dsec)) { P.opt.dsec = x.dsec; redraw = true; }
     if (changed('hg') && HGS.includes(x.hg)) { P.opt.hg = x.hg; redraw = true; }
     if (changed('vol') && Number.isFinite(x.vol)) { P.opt.vol = Math.max(10, Math.min(100, x.vol)); }
     saveOpt();
@@ -406,6 +408,7 @@ function draw() {
   const nx = next[0];
   const day = bellsForDay(key, P.rules, P.timetables, tz(), ctx());
   const mode = effectiveMode(n, day);
+  if (mode !== 'digital') { el.style.background = ''; el.style.color = ''; }
   P.shown = mode;
   loadFont(P.opt.font);
   el.style.fontFamily = fontCss(P.opt.font);
@@ -468,12 +471,15 @@ function draw() {
   }
   if (mode === 'digital') {
     const id = DIGIS.includes(P.opt.digi) ? P.opt.digi : 'led';
-    el.className = `pl digital dg-${id}`;
+    const col = DCOLS.includes(P.opt.dcol) ? P.opt.dcol : 'auto';
+    const C = digiPalette(id, col);
+    el.className = `pl digital dg-${id}${C.light ? ' dg-light' : ''}${['ring', 'arc', 'studio', 'stack'].includes(id) ? ' dg-tall' : ''}`;
+    el.style.background = C.bg; el.style.color = C.light ? '#1E1E1C' : '#F4F5F2';
     el.innerHTML = `${head}
       <div class="pl-dg">
-        <div class="dg-face">${digitalSvg(id, clock.hm, Number(clock.s))}</div>
-        <div class="dg-date">${big.md} ${big.dow}</div>
-        <div class="dg-next">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+        <div class="dg-face">${digitalSvg(id, clock.hm, Number(clock.s), { col, sec: P.opt.dsec })}</div>
+        <div class="dg-date" style="color:${id === 'lcd' && col === 'auto' ? C.sub : C.on}">${big.md} ${big.dow}</div>
+        <div class="dg-next" style="color:${C.sub}">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
       </div>${foot}`;
     return applyShift();
   }
@@ -704,8 +710,8 @@ function drawMenu() {
         <section class="set-card wide"><h4>수묵화 그림 <span class="tiny muted">L 화면</span></h4>
           <div class="art-grid">${INK_ARTS.map(a => `<button class="${(o.art || 'auto') === a.id ? 'on' : ''}" data-pl="opt" data-k="art" data-v="${a.id}" data-pv="art">${a.id === 'auto' ? '<span class="art-mini auto">↻</span>' : `<span class="art-mini">${inkArt(a.id)}</span>`}<span class="tiny">${h(a.name)}</span></button>`).join('')}</div>
         </section>
-        <section class="set-card"><h4>디지털 모양 <span class="tiny muted">M 화면</span></h4>
-          <div class="dg-grid">${DIGI_STYLES.map(d => `<button class="${(o.digi || 'led') === d.id ? 'on' : ''}" data-pl="opt" data-k="digi" data-v="${d.id}" data-pv="digi"><span class="dg-mini dg-${d.id}">${digitalSvg(d.id, '10:09', 32)}</span><span class="tiny">${h(d.name)}</span></button>`).join('')}</div>
+        <section class="set-card wide"><h4>디지털 모양 <span class="tiny muted">M 화면 · 모양 × 색 × 초 보이기를 자유롭게</span></h4>
+          ${digiPickerHtml(o, (k, v) => `data-pl="opt" data-k="${k}" data-v="${v}" data-pv="${k}"`, h)}
         </section>
         <section class="set-card"><h4>한글 시계 모양 <span class="tiny muted">N 화면 · 글씨체도 함께 골라 보세요</span></h4>
           <div class="chips wrap">${HG_STYLES.map(x => `<button class="chip ${(o.hg || 'gold') === x.id ? 'on' : ''}" data-pl="opt" data-k="hg" data-v="${x.id}" data-pv="hg">${h(x.name)}</button>`).join('')}</div>

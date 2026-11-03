@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.10.1';
+export const APP_VERSION = '1.11.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -24,7 +24,7 @@ export const PLAYER_STYLES = [
   { id: 'minimal', name: 'J 화면 보호', desc: '검은 화면에 작은 시계가 떠다님' },
   { id: 'analog3', name: 'K 큰 아날로그', desc: '화면 가득 바늘 시계 + 양옆 날짜·다음 종' },
   { id: 'ink', name: 'L 수묵화', desc: '흑백 수묵화 + 색 시계 · 8점' },
-  { id: 'digital', name: 'M 디지털', desc: 'LED·닉시관·LCD 등 8가지' },
+  { id: 'digital', name: 'M 디지털', desc: '초까지 보이는 17가지 · 색 14가지' },
   { id: 'hangul', name: 'N 한글 시계', desc: '시각에 맞는 한글 글자가 켜짐' }
 ];
 // 아날로그 시계판 디자인 (그림은 faces.js)
@@ -56,7 +56,10 @@ export const ABGS = [
   { id: 'dawn', name: '새벽 노을' }, { id: 'night', name: '밤하늘' }, { id: 'forest', name: '숲 그늘' }
 ];
 export const INK_ARTS = [{ id: 'auto', name: '30분마다 바꾸기' }, { id: 'mountain', name: '산수' }, { id: 'bamboo', name: '대나무' }, { id: 'plum', name: '매화' }, { id: 'orchid', name: '난초' }, { id: 'pine', name: '소나무' }, { id: 'waterfall', name: '폭포' }, { id: 'reed', name: '달밤 갈대' }, { id: 'boat', name: '강 위 쪽배' }];
-export const DIGIS = ['led', 'vfd', 'lcd', 'nixie', 'dot', 'thin', 'block', 'ring'];
+export const DIGIS = ['led', 'vfd', 'lcd', 'nixie', 'dot', 'thin', 'block', 'ring', 'clean', 'mono', 'word', 'cards', 'bar', 'arc', 'studio', 'score', 'stack'];
+// 디지털 색·초 보이기
+export const DCOLS = ['auto', 'red', 'sunset', 'amber', 'gold', 'green', 'cyan', 'blue', 'violet', 'pink', 'white', 'paper', 'mint', 'sky', 'peach'];
+export const DSECS = ['auto', 'on', 'off'];
 export const HGS = ['gold', 'ink', 'tile', 'sentence'];
 // 재생기 글씨체 (모두 무료 · 상업적 사용 가능)
 const FA = n => `https://cdn.jsdelivr.net/gh/fonts-archive/${n}/subsets/${n}-dynamic-subset.css`;

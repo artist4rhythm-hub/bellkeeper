@@ -13,7 +13,7 @@ import {
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, builtinInfo, probeCors
 } from './sounds.js';
 import { createRTA } from './rta.js';
-import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, HG_STYLES } from './faces.js';
+import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
@@ -1958,7 +1958,7 @@ function sheetDevice(sh) {
       <div class="field"><span>수묵화 그림 <span class="muted" style="font-weight:400">· L 화면</span></span>
         <div class="art-grid">${INK_ARTS.map(x => `<button class="${(d.art || 'auto') === x.id ? 'on' : ''}" data-act="device-opt" data-k="art" data-id="${h(d.id)}" data-v="${x.id}" data-pv="art">${x.id === 'auto' ? '<span class="art-mini auto">↻</span>' : `<span class="art-mini">${inkArt(x.id)}</span>`}<span class="tiny">${h(x.name)}</span></button>`).join('')}</div></div>
       <div class="field"><span>디지털 모양 <span class="muted" style="font-weight:400">· M 화면</span></span>
-        <div class="dg-grid">${DIGI_STYLES.map(x => `<button class="${(d.digi || 'led') === x.id ? 'on' : ''}" data-act="device-opt" data-k="digi" data-id="${h(d.id)}" data-v="${x.id}" data-pv="digi"><span class="dg-mini dg-${x.id}">${digitalSvg(x.id, '10:09', 32)}</span><span class="tiny">${h(x.name)}</span></button>`).join('')}</div></div>
+        ${digiPickerHtml(d, (k, v) => `data-act="device-opt" data-k="${k}" data-id="${h(d.id)}" data-v="${v}" data-pv="${k}"`, h)}</div>
       <div class="field"><span>한글 시계 모양 <span class="muted" style="font-weight:400">· N 화면</span></span>
         <div class="chips wrap">${HG_STYLES.map(x => `<button class="chip ${(d.hg || 'gold') === x.id ? 'on' : ''}" data-act="device-opt" data-k="hg" data-id="${h(d.id)}" data-v="${x.id}" data-pv="hg">${h(x.name)}</button>`).join('')}</div></div>
       <div class="field"><span>글씨체</span>
@@ -2854,7 +2854,7 @@ window.__bkPreviewState = () => {
   return {
     space: S.space, saved: { name: d.name || '재생기' }, timetables: S.timetables, rules: S.rules, groups: [...S.groups], group: devGroup(d), sounds: S.sounds, offset: 0,
     mode: pv.mode || d.display || d.mode || 'light',
-    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0 })
+    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', dcol: d.dcol || 'auto', dsec: d.dsec || 'auto', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0 })
   };
 };
 document.addEventListener('mouseover', e => {
