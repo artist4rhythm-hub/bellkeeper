@@ -13,7 +13,8 @@ import {
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, builtinInfo, probeCors
 } from './sounds.js';
 import { createRTA } from './rta.js';
-import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, HG_STYLES } from './faces.js';
+import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts } from './themes.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
@@ -1941,34 +1942,12 @@ function sheetDevice(sh) {
           <button class="btn primary" data-act="device-lock" data-id="${h(d.id)}">${d.locked ? '비밀번호 바꾸기' : '잠그기'}</button></div>
         ${d.locked ? `<button class="btn" data-act="device-unlock" data-id="${h(d.id)}">잠금 끄기</button>` : ''}
       </section>
-      <button class="btn danger" data-act="device-remove" data-id="${h(d.id)}" style="align-self:flex-start">연결 해제</button>
-    </div>
-    <div class="stack">
-      <div class="field"><div class="row between"><span class="bold small">미리 보기</span>
-        <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${(S.pvSize || 'tv') === k ? 'on' : ''}" data-act="pv-size" data-v="${k}">${t}</button>`).join('')}</div></div>
-        <div class="pv-box ${S.pvSize || 'tv'}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
-        <div class="tiny muted">버튼에 마우스를 올리면 그 모양으로 미리 보여요.</div></div>
-      <div class="field"><span>화면 모양</span>
-        <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${cur === s.id ? 'on' : ''}" data-act="device-display" data-id="${h(d.id)}" data-v="${s.id}" data-pv="mode" aria-pressed="${cur === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
-        <div class="tiny muted">누르면 재생기 화면이 몇 초 안에 바로 바뀌어요.</div></div>
-      <div class="field"><span>시계판 디자인 <span class="muted" style="font-weight:400">· F·G·K 아날로그 화면</span></span>
-        <div class="dial-grid">${DIALS.map(x => `<button class="${(d.dial || 'classic') === x.id ? 'on' : ''}" data-act="device-opt" data-k="dial" data-id="${h(d.id)}" data-v="${x.id}" data-pv="dial"><span class="dial-mini">${clockSvg({ h: 10, mi: 9, s: 32 }, x.id)}</span><b>${h(x.name)}</b><span class="muted tiny">${h(x.desc)}</span></button>`).join('')}</div></div>
-      <div class="field"><span>아날로그 배경 <span class="muted" style="font-weight:400">· F·K 화면</span></span>
-        <div class="sw-grid">${ABGS.map(x => `<button class="${(d.abg || 'plain') === x.id ? 'on' : ''}" data-act="device-opt" data-k="abg" data-id="${h(d.id)}" data-v="${x.id}" data-pv="abg"><span class="sw abg-${x.id}"></span><span class="tiny">${h(x.name)}</span></button>`).join('')}</div></div>
-      <div class="field"><span>수묵화 그림 <span class="muted" style="font-weight:400">· L 화면</span></span>
-        <div class="art-grid">${INK_ARTS.map(x => `<button class="${(d.art || 'auto') === x.id ? 'on' : ''}" data-act="device-opt" data-k="art" data-id="${h(d.id)}" data-v="${x.id}" data-pv="art">${x.id === 'auto' ? '<span class="art-mini auto">↻</span>' : `<span class="art-mini">${inkArt(x.id)}</span>`}<span class="tiny">${h(x.name)}</span></button>`).join('')}</div></div>
-      <div class="field"><span>디지털 모양 <span class="muted" style="font-weight:400">· M 화면</span></span>
-        <div class="dg-grid">${DIGI_STYLES.map(x => `<button class="${(d.digi || 'led') === x.id ? 'on' : ''}" data-act="device-opt" data-k="digi" data-id="${h(d.id)}" data-v="${x.id}" data-pv="digi"><span class="dg-mini dg-${x.id}">${digitalSvg(x.id, '10:09', 32)}</span><span class="tiny">${h(x.name)}</span></button>`).join('')}</div></div>
-      <div class="field"><span>한글 시계 모양 <span class="muted" style="font-weight:400">· N 화면</span></span>
-        <div class="chips wrap">${HG_STYLES.map(x => `<button class="chip ${(d.hg || 'gold') === x.id ? 'on' : ''}" data-act="device-opt" data-k="hg" data-id="${h(d.id)}" data-v="${x.id}" data-pv="hg">${h(x.name)}</button>`).join('')}</div></div>
-      <div class="field"><span>글씨체</span>
-        <div class="font-grid">${FONTS.map(f => { loadFont(f.id); return `<button class="${(d.font || 'noto') === f.id ? 'on' : ''}" data-act="device-opt" data-k="font" data-id="${h(d.id)}" data-v="${f.id}" data-pv="font"><span class="fs" style="font-family:${f.css.replace(/"/g, "'")}">열 시 구 분</span><span class="muted tiny">${h(f.name)}</span></button>`; }).join('')}</div></div>
-      <div class="field"><span>화면 보호 (모니터가 타지 않게)</span>
+      <section class="card stack">      <div class="bold">화면 보호 (모니터가 타지 않게)</div>
         <div class="chips wrap"><button class="chip ${saver === 'night' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="night">수업 없을 때 화면 보호</button>
           <button class="chip ${saver === 'off' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="off">항상 고른 화면</button></div>
         <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${cycle === v ? 'on' : ''}" data-act="device-cycle" data-id="${h(d.id)}" data-v="${v}">${t}</button>`).join('')}</div>
         <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면, 그리고 종이 없는 날은 검은 화면에 작은 시계가 떠다녀요.
-          모든 화면은 1분마다 몇 픽셀씩 움직여서 같은 자리에 오래 머물지 않아요.</div></div>
+          모든 화면은 1분마다 몇 픽셀씩 움직여서 같은 자리에 오래 머물지 않아요.</div></section>
       <details class="card small"><summary class="bold">노트북을 완전히 잠그려면 (키오스크 모드)</summary>
         <div class="stack tight muted" style="margin-top:8px;line-height:1.7">
           <div>· <b>Windows</b>: 설정 › 계정 › 기타 사용자 › <b>키오스크 설정</b>(할당된 액세스) → Microsoft Edge로 재생기 주소를 키오스크로 열기</div>
@@ -1977,6 +1956,19 @@ function sheetDevice(sh) {
           <div>· <b>안드로이드 태블릿</b>: 설정 › 보안 › <b>앱 고정</b> 켜기</div>
           <div>· <b>맥북</b>: 시스템 설정 › 화면 잠금에서 화면 보호기·잠자기를 "안 함"으로, 재생기는 전체 화면으로</div>
         </div></details>
+      <button class="btn danger" data-act="device-remove" data-id="${h(d.id)}" style="align-self:flex-start">연결 해제</button>
+    </div>
+    <div class="stack">
+      <div class="field"><div class="row between"><span class="bold small">미리 보기</span>
+        <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${(S.pvSize || 'tv') === k ? 'on' : ''}" data-act="pv-size" data-v="${k}">${t}</button>`).join('')}</div></div>
+        <div class="pv-box ${S.pvSize || 'tv'}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
+        <div class="tiny muted">${sh.theme ? `"${h(styleName(sh.theme))}" 미리 보기` : `지금 화면: ${h(styleName(cur))}`}</div></div>
+      <section class="dv-theme">${sh.theme ? `${themeHeadHtml(sh.theme, cur, 'data-act="dv-theme-back"', `data-act="device-display" data-id="${h(d.id)}" data-v="${sh.theme}"`, h)}
+        ${optTabsHtml(sh.theme, themeOpts(sh.theme).includes(sh.otab) ? sh.otab : themeOpts(sh.theme)[0], k => `data-act="dv-otab" data-v="${k}"`)}
+        ${optPanelHtml(themeOpts(sh.theme).includes(sh.otab) ? sh.otab : themeOpts(sh.theme)[0], d, (k, v) => `data-act="device-opt" data-k="${k}" data-id="${h(d.id)}" data-v="${v}" data-pv="${k}"`, h)}
+        <div class="tiny muted">버튼에 마우스를 올리면 위 미리 보기가 바뀌어요. 누르면 그 재생기에 몇 초 안에 반영돼요.${sh.theme !== cur ? ' 재생 화면을 이 모양으로 바꾸려면 [이 화면으로 쓰기]를 눌러 주세요.' : ''}</div>`
+      : `<div class="row between"><span class="bold">화면 모양</span><span class="tiny muted">누르면 그 모양에서 고를 수 있는 옵션만 나와요</span></div>
+        ${themeGridHtml(cur, id => `data-act="dv-theme" data-v="${id}"`, h)}`}</section>
     </div>
   </div>`, { wide: true });
 }
@@ -2568,6 +2560,9 @@ document.addEventListener('click', async e => {
         await sendCommand({ type: 'reload', target: id }); return toast('새로 고침 신호를 보냈어요');
       }
       case 'pv-size': S.pvSize = el.dataset.v; renderSheet(); return mountPv();
+      case 'dv-theme': sh.theme = el.dataset.v; sh.otab = themeOpts(el.dataset.v)[0]; S.pv = null; renderSheet(); return mountPv();
+      case 'dv-theme-back': sh.theme = null; S.pv = null; renderSheet(); return mountPv();
+      case 'dv-otab': sh.otab = el.dataset.v; renderSheet(); return mountPv();
       case 'device-opt': {
         const patch = { [el.dataset.k]: el.dataset.v };
         await F.updateDoc(F.doc(sub('devices'), id), patch);
@@ -2853,8 +2848,8 @@ window.__bkPreviewState = () => {
   const pv = S.pv || {};
   return {
     space: S.space, saved: { name: d.name || '재생기' }, timetables: S.timetables, rules: S.rules, groups: [...S.groups], group: devGroup(d), sounds: S.sounds, offset: 0,
-    mode: pv.mode || d.display || d.mode || 'light',
-    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0 })
+    mode: pv.mode || sh.theme || d.display || d.mode || 'light',
+    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', dcol: d.dcol || 'auto', dsec: d.dsec || 'auto', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0 })
   };
 };
 document.addEventListener('mouseover', e => {

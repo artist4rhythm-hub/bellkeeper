@@ -752,11 +752,11 @@ body.preview .pl-gate, body.preview .pl-ringing { display: none !important; }
 .pl.dg-nixie { background: #120D0A; } .pl.dg-nixie .dg-date { color: #FFB25A; }
 .pl.dg-dot { background: #0B0A08; } .pl.dg-dot .dg-date { color: #FFB020; text-shadow: 0 0 8px rgba(255,176,32,.6); }
 .pl.dg-thin { background: #0E1513; } .pl.dg-thin .dg-date { font-weight: 300; letter-spacing: .3em; color: #9AA5A0; } .pl.dg-thin .dg-next { color: #E0B25A; }
-.pl.dg-block { background: #F4F0E6; color: #1E1E1C; } .pl.dg-block .pl-foot { color: #4A5752; border-color: var(--line); } .pl.dg-block .btn { background: var(--card); border-color: var(--line); color: var(--ink); } .pl.dg-block .pl-name { color: var(--ink); }
+.pl.digital.dg-light .pl-foot { color: #4A5752; border-color: rgba(0,0,0,.12); } .pl.digital.dg-light .btn { background: rgba(255,255,255,.7); border-color: rgba(0,0,0,.12); color: var(--ink); } .pl.digital.dg-light .pl-name { color: #4A5752; }
 .pl.dg-ring { background: #17231F; } .pl.dg-ring .dg-date { color: #F4F5F2; }
-.pl.digital:not(.dg-block) .pl-foot { border-color: #26332D; color: #9AA5A0; }
-.pl.digital:not(.dg-block) .btn { background: transparent; border-color: #3A4842; color: #DDE3DF; }
-.pl.digital:not(.dg-block) .pl-name { color: #9AA5A0; }
+.pl.digital:not(.dg-light) .pl-foot { border-color: #26332D; color: #9AA5A0; }
+.pl.digital:not(.dg-light) .btn { background: transparent; border-color: #3A4842; color: #DDE3DF; }
+.pl.digital:not(.dg-light) .pl-name { color: #9AA5A0; }
 
 /* ── N 한글 시계 ───────────── */
 .pl-hg { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; }
@@ -958,3 +958,50 @@ body.preview .pl-gate, body.preview .pl-ringing { display: none !important; }
 @media (min-width: 1500px) { .cal .cell { min-height: 92px; font-size: 15px; } .cal .cell .lbl { font-size: 12px; } }
 @media (min-width: 2200px) { .cal .cell { min-height: 116px; } body { font-size: 16px; } }
 .grp-pick button > .tiny.bold { white-space: nowrap; flex-shrink: 0; }
+
+/* v1.11 디지털: 색·초 보이기 */
+.pl.digital .dg-face .dg-svg.tall { width: auto; height: 56vh; }
+.pl.digital.dg-tall .dg-face { max-height: 62vh; }
+.dg-grid button .tiny { text-align: center; line-height: 1.3; }
+.dg-newb { background: var(--gold); color: var(--ink); font-size: 9px; padding: 0 4px; border-radius: 4px; vertical-align: 1px; }
+.dg-mini .dg-svg.tall, .dg-mini .dg-svg.ring { width: auto; height: 100%; }
+.dc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.dc-grid button { border: 2px solid var(--line); background: var(--card); border-radius: 10px; padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink); }
+.dc-grid button.on { border-color: var(--ink); }
+.dc-sw { width: 100%; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.dc-sw b { font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.chip:disabled { opacity: .4; cursor: default; }
+.dg-mini { font-family: 'Noto Sans KR', sans-serif; }
+
+/* v1.12 화면 모양별 설정 (1단계 목록 → 2단계 옵션) */
+.set-tabs { display: flex; gap: 4px; padding: 8px clamp(12px, 3vw, 28px) 0; background: var(--card); border-bottom: 1px solid var(--line); overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+.set-tabs::-webkit-scrollbar { display: none; }
+.set-tabs button { border: 0; background: none; padding: 10px 14px 12px; font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
+.set-tabs button.on { color: var(--ink); border-bottom-color: var(--brass); font-weight: 800; }
+.set-page:not(.pv-on) .set-pv { display: none; }
+.th-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.th { position: relative; border: 2px solid var(--line); background: var(--card); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 6px; text-align: left; color: var(--ink); }
+.th:hover { border-color: var(--brass-line); box-shadow: 0 6px 18px rgba(23,35,31,.08); }
+.th.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink) inset; }
+.th .mini { height: 92px; border-radius: 10px; }
+.th b { font-size: 15px; }
+.th-d { font-size: 12px; color: var(--muted); }
+.th-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.th-tag { font-size: 11px; font-weight: 700; background: var(--brass-tint); color: var(--brass-text); padding: 2px 7px; border-radius: 6px; }
+.th-tag.gray { background: var(--ground-2); color: var(--faint); }
+.th-use { position: absolute; top: 8px; right: 8px; background: var(--ink); color: #fff; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 8px; z-index: 1; }
+.th-go { font-size: 12px; font-weight: 800; color: var(--brass-text); margin-top: auto; }
+.th-crumb { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.th-crumb .mini { width: 72px; height: 42px; border-radius: 8px; flex-shrink: 0; }
+.th-crumb b { font-size: 18px; }
+.th-now { font-size: 13px; font-weight: 800; color: var(--ok); background: #E4F1EA; padding: 8px 12px; border-radius: 10px; }
+.th-otabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.th-otabs button { border: 0; background: none; padding: 10px 14px; font-size: 15px; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; }
+.th-otabs button.on { color: var(--ink); border-bottom-color: var(--brass); font-weight: 800; }
+.th-otabs .n { font-size: 11px; background: var(--ground-2); color: var(--faint); border-radius: 8px; padding: 1px 6px; margin-left: 5px; }
+.hg-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.hg-pick button { border: 2px solid var(--line); background: var(--card); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 4px; text-align: left; color: var(--ink); }
+.hg-pick button.on { border-color: var(--ink); background: var(--ground-2); }
+@media (max-width: 699px) { .th-grid { grid-template-columns: 1fr 1fr; gap: 8px; } .th { padding: 8px; } .th .mini { height: 60px; } .th-tags, .th-go { display: none; } .th-crumb b { font-size: 16px; } .set-tabs button { font-size: 13px; padding: 8px 10px 10px; } }
+/* 관리자 [기기] 창 */
+.dv-theme { display: flex; flex-direction: column; gap: 12px; }

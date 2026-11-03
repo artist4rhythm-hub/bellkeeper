@@ -1,8 +1,9 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, HGS } from './core.js';
-import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS } from './core.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts } from './themes.js';
+import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
@@ -31,7 +32,7 @@ const P = {
   mode: validMode(localStorage.getItem(LS_MODE)),
   upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null,
   // 화면 보호·음량·잠금 (관리자가 원격으로 바꾸면 그대로 따름)
-  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
+  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', dcol: 'auto', dsec: 'auto', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
   locked: false, pinHash: '', unlockedUntil: 0, seen: {}
 };
 function saveOpt() { if (PREVIEW) return; try { localStorage.setItem(LS_OPT, JSON.stringify(P.opt)); } catch (e) { /* 무시 */ } }
@@ -221,6 +222,8 @@ function startRunning() {
     if (changed('abg') && ABGS.some(f => f.id === x.abg)) { P.opt.abg = x.abg; redraw = true; }
     if (changed('art') && INK_ARTS.some(f => f.id === x.art)) { P.opt.art = x.art; redraw = true; }
     if (changed('digi') && DIGIS.includes(x.digi)) { P.opt.digi = x.digi; redraw = true; }
+    if (changed('dcol') && DCOLS.includes(x.dcol)) { P.opt.dcol = x.dcol; redraw = true; }
+    if (changed('dsec') && DSECS.includes(x.dsec)) { P.opt.dsec = x.dsec; redraw = true; }
     if (changed('hg') && HGS.includes(x.hg)) { P.opt.hg = x.hg; redraw = true; }
     if (changed('vol') && Number.isFinite(x.vol)) { P.opt.vol = Math.max(10, Math.min(100, x.vol)); }
     saveOpt();
@@ -406,6 +409,7 @@ function draw() {
   const nx = next[0];
   const day = bellsForDay(key, P.rules, P.timetables, tz(), ctx());
   const mode = effectiveMode(n, day);
+  if (mode !== 'digital') { el.style.background = ''; el.style.color = ''; }
   P.shown = mode;
   loadFont(P.opt.font);
   el.style.fontFamily = fontCss(P.opt.font);
@@ -468,12 +472,15 @@ function draw() {
   }
   if (mode === 'digital') {
     const id = DIGIS.includes(P.opt.digi) ? P.opt.digi : 'led';
-    el.className = `pl digital dg-${id}`;
+    const col = DCOLS.includes(P.opt.dcol) ? P.opt.dcol : 'auto';
+    const C = digiPalette(id, col);
+    el.className = `pl digital dg-${id}${C.light ? ' dg-light' : ''}${['ring', 'arc', 'studio', 'stack'].includes(id) ? ' dg-tall' : ''}`;
+    el.style.background = C.bg; el.style.color = C.light ? '#1E1E1C' : '#F4F5F2';
     el.innerHTML = `${head}
       <div class="pl-dg">
-        <div class="dg-face">${digitalSvg(id, clock.hm, Number(clock.s))}</div>
-        <div class="dg-date">${big.md} ${big.dow}</div>
-        <div class="dg-next">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
+        <div class="dg-face">${digitalSvg(id, clock.hm, Number(clock.s), { col, sec: P.opt.dsec })}</div>
+        <div class="dg-date" style="color:${id === 'lcd' && col === 'auto' ? C.sub : C.on}">${big.md} ${big.dow}</div>
+        <div class="dg-next" style="color:${C.sub}">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')} · ${fmtLeft(nx.at - n)} 남음${nxDay(nx)}` : '앞으로 7일 동안 울릴 종이 없어요'}</div>
       </div>${foot}`;
     return applyShift();
   }
@@ -678,6 +685,7 @@ function openMenu() {
   gate.classList.remove('hidden');
   gate.classList.add('full');
   gate.dataset.kind = 'menu';
+  P.setTab = 'screen'; P.setTheme = null;
   drawMenu();
   mountPreview();
 }
@@ -686,74 +694,73 @@ function closeMenu() {
   P.pv = null; draw();
 }
 const SAMPLE_Z = { h: 10, mi: 9, s: 32, y: 2026, m: 10, d: 23, dow: 5 };
+const SET_TABS = [['screen', '화면 모양'], ['group', '재생 그룹'], ['saver', '화면 보호·자동 바꾸기'], ['sound', '소리'], ['device', '이 기기']];
 function drawMenu() {
   const o = P.opt;
   const pvSize = P.pvSize || 'tv';
-  const mainHtml = `<section class="set-card wide"><h4>재생 그룹 <span class="tiny muted">이 재생기가 어떤 요일별 일과표로 울릴지 골라요${realGroups().length ? '' : ' · 관리자 화면 › 재생 그룹에서 1학년·2학년 같은 그룹을 만들면 여기에 나와요'}</span></h4>
-          ${groupPickerHtml()}
-        </section>
-        <section class="set-card wide"><h4>화면 모양</h4>
-          <div class="style-grid">${PLAYER_STYLES.map(s => `<button class="${P.mode === s.id ? 'on' : ''}" data-pl="mode" data-v="${s.id}" data-pv="mode" aria-pressed="${P.mode === s.id}"><span class="mini pv-${s.id}"></span><b>${h(s.name)}</b><span class="muted">${h(s.desc)}</span></button>`).join('')}</div>
-        </section>
-        <section class="set-card"><h4>시계판 디자인 <span class="tiny muted">F·G·K 아날로그 화면</span></h4>
-          <div class="dial-grid">${DIALS.map(d => `<button class="${o.dial === d.id ? 'on' : ''}" data-pl="dial" data-v="${d.id}" data-pv="dial"><span class="dial-mini">${analogSvg(SAMPLE_Z, false, d.id)}</span><b>${h(d.name)}</b><span class="muted tiny">${h(d.desc)}</span></button>`).join('')}</div>
-        </section>
-        <section class="set-card"><h4>아날로그 배경 <span class="tiny muted">F·K 화면</span></h4>
-          <div class="sw-grid">${ABGS.map(b => `<button class="${(o.abg || 'plain') === b.id ? 'on' : ''}" data-pl="opt" data-k="abg" data-v="${b.id}" data-pv="abg"><span class="sw abg-${b.id}"></span><span class="tiny">${h(b.name)}</span></button>`).join('')}</div>
-        </section>
-        <section class="set-card wide"><h4>수묵화 그림 <span class="tiny muted">L 화면</span></h4>
-          <div class="art-grid">${INK_ARTS.map(a => `<button class="${(o.art || 'auto') === a.id ? 'on' : ''}" data-pl="opt" data-k="art" data-v="${a.id}" data-pv="art">${a.id === 'auto' ? '<span class="art-mini auto">↻</span>' : `<span class="art-mini">${inkArt(a.id)}</span>`}<span class="tiny">${h(a.name)}</span></button>`).join('')}</div>
-        </section>
-        <section class="set-card"><h4>디지털 모양 <span class="tiny muted">M 화면</span></h4>
-          <div class="dg-grid">${DIGI_STYLES.map(d => `<button class="${(o.digi || 'led') === d.id ? 'on' : ''}" data-pl="opt" data-k="digi" data-v="${d.id}" data-pv="digi"><span class="dg-mini dg-${d.id}">${digitalSvg(d.id, '10:09', 32)}</span><span class="tiny">${h(d.name)}</span></button>`).join('')}</div>
-        </section>
-        <section class="set-card"><h4>한글 시계 모양 <span class="tiny muted">N 화면 · 글씨체도 함께 골라 보세요</span></h4>
-          <div class="chips wrap">${HG_STYLES.map(x => `<button class="chip ${(o.hg || 'gold') === x.id ? 'on' : ''}" data-pl="opt" data-k="hg" data-v="${x.id}" data-pv="hg">${h(x.name)}</button>`).join('')}</div>
-        </section>
-        <section class="set-card wide"><h4>글씨체</h4>
-          <div class="font-grid">${FONTS.map(f => { loadFont(f.id); return `<button class="${o.font === f.id ? 'on' : ''}" data-pl="font" data-v="${f.id}" data-pv="font"><span class="fs" style="font-family:${f.css.replace(/"/g, "'")}">열 시 구 분</span><span class="muted tiny">${h(f.name)}</span></button>`; }).join('')}</div>
-        </section>
-        <section class="set-card"><h4>화면 보호 (모니터가 타지 않게)</h4>
-          <div class="chips wrap"><button class="chip ${o.saver === 'night' ? 'on' : ''}" data-pl="saver" data-v="night">수업 없을 때 화면 보호</button>
-            <button class="chip ${o.saver === 'off' ? 'on' : ''}" data-pl="saver" data-v="off">항상 고른 화면</button></div>
-          <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${o.cycle === v ? 'on' : ''}" data-pl="cycle" data-v="${v}">${t}</button>`).join('')}</div>
-          <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면 J 화면 보호로 바뀌어요. 1분마다 화면이 몇 픽셀씩 움직이는 기능은 항상 켜져 있어요.</div>
-        </section>
-        <section class="set-card"><h4>소리</h4>
-          <label class="field"><span class="small bold">재생기 음량 <span id="pl-vol-lab">${o.vol}%</span></span><input type="range" id="pl-vol" min="10" max="100" step="5" value="${o.vol}"></label>
-          <label class="field"><span class="small bold">기기 음성 (Google 음성을 안 쓸 때 안내 문구를 읽는 목소리)</span>
-            <select class="input" id="pl-voice">${(() => { const pref = getDeviceVoicePref(); const vs = deviceVoices();
-              return vs.length ? vs.map(v => `<option value="${h(v.voiceURI)}" ${pref.uri === v.voiceURI ? 'selected' : ''}>${h(v.name)}</option>`).join('') : '<option value="">기본 목소리</option>'; })()}</select></label>
-          <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow"><button class="btn" data-pl="voice-test">들어보기</button></div>
-          <button class="btn block" data-pl="test">소리 시험</button>
-        </section>
-        <section class="set-card"><h4>이 기기</h4>
-          <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
-          <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
-          <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button>
-        </section>`;
+  const tab = P.setTab || 'screen', theme = tab === 'screen' ? P.setTheme : null;
+  let mainHtml = '';
+  if (tab === 'screen' && !theme) {
+    mainHtml = `<section class="set-card wide"><h4>화면 모양 <span class="tiny muted">누르면 그 모양에서 고를 수 있는 옵션만 나와요 · 노란 꼬리표 = 그 모양 전용 옵션</span></h4>
+      ${themeGridHtml(P.mode, id => `data-pl="theme" data-v="${id}"`, h)}</section>`;
+  } else if (tab === 'screen') {
+    const ot = themeOpts(theme).includes(P.setOpt) ? P.setOpt : themeOpts(theme)[0];
+    mainHtml = `<section class="set-card wide">${themeHeadHtml(theme, P.mode, 'data-pl="theme-back"', `data-pl="mode" data-v="${theme}"`, h)}
+      ${optTabsHtml(theme, ot, k => `data-pl="otab" data-v="${k}"`)}
+      ${optPanelHtml(ot, o, (k, v) => `data-pl="opt" data-k="${k}" data-v="${v}" data-pv="${k}"`, h)}
+      <div class="tiny muted">버튼에 마우스를 올리면 왼쪽 미리 보기가 바로 바뀌어요. 누르면 저장돼요.${theme !== P.mode ? ' 재생 화면을 이 모양으로 바꾸려면 위의 [이 화면으로 쓰기]를 눌러 주세요.' : ''}</div></section>`;
+  } else if (tab === 'group') {
+    mainHtml = `<section class="set-card wide"><h4>재생 그룹 <span class="tiny muted">이 재생기가 어떤 요일별 일과표로 울릴지 골라요${realGroups().length ? '' : ' · 관리자 화면 › 재생 그룹에서 1학년·2학년 같은 그룹을 만들면 여기에 나와요'}</span></h4>
+      ${groupPickerHtml()}</section>`;
+  } else if (tab === 'saver') {
+    mainHtml = `<section class="set-card wide"><h4>화면 보호 (모니터가 타지 않게)</h4>
+      <div class="chips wrap"><button class="chip ${o.saver === 'night' ? 'on' : ''}" data-pl="saver" data-v="night">수업 없을 때 화면 보호</button>
+        <button class="chip ${o.saver === 'off' ? 'on' : ''}" data-pl="saver" data-v="off">항상 고른 화면</button></div>
+      <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면 J 화면 보호로 바뀌어요. 1분마다 화면이 몇 픽셀씩 움직이는 기능은 항상 켜져 있어요.</div></section>
+      <section class="set-card wide"><h4>화면 모양 자동 바꾸기</h4>
+      <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${o.cycle === v ? 'on' : ''}" data-pl="cycle" data-v="${v}">${t}</button>`).join('')}</div>
+      <div class="tiny muted">정해 둔 시간마다 화면 모양이 차례로 바뀌어요. 같은 화면이 오래 머물지 않아 모니터에도 좋아요.</div></section>`;
+  } else if (tab === 'sound') {
+    mainHtml = `<section class="set-card wide"><h4>소리</h4>
+      <label class="field"><span class="small bold">재생기 음량 <span id="pl-vol-lab">${o.vol}%</span></span><input type="range" id="pl-vol" min="10" max="100" step="5" value="${o.vol}"></label>
+      <label class="field"><span class="small bold">기기 음성 (Google 음성을 안 쓸 때 안내 문구를 읽는 목소리)</span>
+        <select class="input" id="pl-voice">${(() => { const pref = getDeviceVoicePref(); const vs = deviceVoices();
+          return vs.length ? vs.map(v => `<option value="${h(v.voiceURI)}" ${pref.uri === v.voiceURI ? 'selected' : ''}>${h(v.name)}</option>`).join('') : '<option value="">기본 목소리</option>'; })()}</select></label>
+      <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow"><button class="btn" data-pl="voice-test">들어보기</button></div>
+      <button class="btn block" data-pl="test">소리 시험</button></section>`;
+  } else {
+    mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
+      <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
+      <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
+      <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button></section>`;
+  }
+  const tabsHtml = SET_TABS.map(([k, t]) => `<button class="${tab === k ? 'on' : ''}" data-pl="stab" data-v="${k}">${t}</button>`).join('');
   const page = gate.querySelector('.set-page');
   if (page) {
     // 미리 보기 창은 그대로 두고 설정 칸만 다시 그림 (깜빡임 없이)
-    const m = page.querySelector('.set-main'), st = m.scrollTop;
+    const m = page.querySelector('.set-main'), st = P.setScrollTop ? 0 : m.scrollTop;
+    P.setScrollTop = false;
     m.innerHTML = mainHtml; m.scrollTop = st;
+    page.querySelector('.set-tabs').innerHTML = tabsHtml;
+    page.classList.toggle('pv-on', !!theme);
     page.querySelectorAll('[data-pl="pvsize"]').forEach(b => b.classList.toggle('on', b.dataset.v === pvSize));
     const box = page.querySelector('.pv-box'); if (box) box.className = `pv-box ${pvSize}`;
     pokePreview();
     return;
   }
-  gate.innerHTML = `<div class="set-page">
+  gate.innerHTML = `<div class="set-page ${theme ? 'pv-on' : ''}">
     <header class="set-head">
       <button class="btn" data-pl="close">← 재생 화면으로</button>
       <div class="grow"><div class="bold" style="font-size:18px">재생기 설정</div><div class="tiny muted">고르면 바로 저장돼요</div></div>
       <button class="btn gold" data-pl="close">저장하고 돌아가기</button>
     </header>
+    <nav class="set-tabs">${tabsHtml}</nav>
     <div class="set-body">
       <aside class="set-pv">
         <div class="row between"><div class="bold">미리 보기</div>
           <div class="seg">${[['tv', 'TV·PC'], ['tab', '태블릿'], ['phone', '세로 폰']].map(([k, t]) => `<button class="${pvSize === k ? 'on' : ''}" data-pl="pvsize" data-v="${k}">${t}</button>`).join('')}</div></div>
         <div class="pv-box ${pvSize}"><iframe id="pv-frame" title="재생기 미리 보기" src="play.html?preview=1" tabindex="-1"></iframe></div>
-        <div class="tiny muted">버튼에 마우스를 올리면 그 모양으로 미리 보여요. 실제 화면과 똑같이 그려요.</div>
+        <div class="tiny muted">실제 화면과 똑같이 그려요.</div>
       </aside>
       <div class="set-main">${mainHtml}</div>
     </div>
@@ -777,7 +784,7 @@ window.__bkPreviewState = () => {
   const pv = P.pv || {};
   return {
     space: P.space, saved: P.saved, timetables: P.timetables, rules: P.rules, groups: P.groups, group: P.group, sounds: P.sounds, offset: P.offset,
-    mode: pv.mode || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, ...Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')) }
+    mode: pv.mode || (gate.dataset.kind === 'menu' && P.setTab === 'screen' && P.setTheme) || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, ...Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')) }
   };
 };
 document.addEventListener('mouseover', e => {
@@ -854,6 +861,10 @@ document.addEventListener('click', async e => {
   if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); drawMenu(); mountPreview(); return; }
   if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'stab') { P.setTab = b.dataset.v; P.setScrollTop = true; P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'theme') { P.setTheme = b.dataset.v; P.setOpt = themeOpts(b.dataset.v)[0]; P.setScrollTop = true; P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'theme-back') { P.setTheme = null; P.setScrollTop = true; P.pv = null; drawMenu(); return; }
+  if (a === 'otab') { P.setOpt = b.dataset.v; P.setScrollTop = true; drawMenu(); return; }
   if (a === 'pvsize') { P.pvSize = b.dataset.v; drawMenu(); mountPreview(); return; }
   if (isLocked() && ['test', 'menu', 'update', 'unlink', 'mode', 'fullscreen', 'group'].includes(a)) return openPin(a === 'menu' ? 'menu' : '');
   if (a === 'test') { await unlockAudio(); ring({ soundId: 'b:dingdong', label: '소리 시험', volume: 100 }); }

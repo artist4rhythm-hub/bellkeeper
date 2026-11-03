@@ -189,53 +189,222 @@ function segRow(str, w, h, gap, on, off, t, skew, filter, blink) {
 }
 const DOT = { 0: ['01110', '10001', '10011', '10101', '11001', '10001', '01110'], 1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'], 2: ['01110', '10001', '00001', '00010', '00100', '01000', '11111'], 3: ['11110', '00001', '00001', '01110', '00001', '00001', '11110'], 4: ['00010', '00110', '01010', '10010', '11111', '00010', '00010'], 5: ['11111', '10000', '11110', '00001', '00001', '10001', '01110'], 6: ['00110', '01000', '10000', '11110', '10001', '10001', '01110'], 7: ['11111', '00001', '00010', '00100', '01000', '01000', '01000'], 8: ['01110', '10001', '10001', '01110', '10001', '10001', '01110'], 9: ['01110', '10001', '10001', '01111', '00001', '00010', '01100'], ':': ['0', '1', '1', '0', '1', '1', '0'] };
 const DGLOW = `<defs><filter id="dGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter><filter id="dGlow2" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`;
+// 디지털 모양 (기존 8 + 초까지 보이는 새 모양 9)
 export const DIGI_STYLES = [
-  { id: 'led', name: '7세그먼트 LED', bg: '#0C0D0F', ink: '#FF8A80', sub: '#B9B2AE' },
-  { id: 'vfd', name: '형광 표시관', bg: '#06100F', ink: '#5CFFD8', sub: '#7FBFAF' },
-  { id: 'lcd', name: '레트로 LCD', bg: '#2A2C2A', ink: '#2B3324', sub: '#2B3324' },
-  { id: 'nixie', name: '닉시관', bg: '#120D0A', ink: '#FFB25A', sub: '#C98F55' },
-  { id: 'dot', name: 'LED 도트', bg: '#0B0A08', ink: '#FFB020', sub: '#9C8B6E' },
-  { id: 'thin', name: '미니멀 얇은 글씨', bg: '#0E1513', ink: '#F4F5F2', sub: '#E0B25A' },
-  { id: 'block', name: '오방색 블록', bg: '#F4F0E6', ink: '#1E1E1C', sub: '#4A5752' },
-  { id: 'ring', name: '초 링 + 큰 숫자', bg: '#17231F', ink: '#F4F5F2', sub: '#E0B25A' }
+  { id: 'led', name: '7세그먼트 LED', col: 'red', sec: false },
+  { id: 'vfd', name: '형광 표시관', col: 'cyan', sec: false },
+  { id: 'lcd', name: '레트로 LCD', col: 'lcd', sec: false },
+  { id: 'nixie', name: '닉시관', col: 'nixie', sec: false },
+  { id: 'dot', name: 'LED 도트', col: 'amber', sec: false },
+  { id: 'thin', name: '미니멀 얇은 글씨', col: 'white', sec: false },
+  { id: 'block', name: '오방색 블록', col: 'obang', sec: false },
+  { id: 'ring', name: '초 링 + 큰 숫자', col: 'gold', sec: true, fixed: true },
+  { id: 'clean', name: '심플 (작은 초)', col: 'paper', sec: true, isNew: true },
+  { id: 'mono', name: '심플 시:분:초', col: 'white', sec: true, isNew: true },
+  { id: 'word', name: '글자 (10시 09분 32초)', col: 'gold', sec: true, isNew: true },
+  { id: 'cards', name: '시·분·초 카드', col: 'white', sec: true, isNew: true },
+  { id: 'bar', name: '초 진행 막대', col: 'blue', sec: true, fixed: true, isNew: true },
+  { id: 'arc', name: '초 원호', col: 'violet', sec: true, fixed: true, isNew: true },
+  { id: 'studio', name: '방송실 스튜디오', col: 'red', sec: true, fixed: true, isNew: true },
+  { id: 'score', name: '경기장 전광판', col: 'amber', sec: true, isNew: true },
+  { id: 'stack', name: '세로 포스터', col: 'sunset', sec: true, isNew: true }
 ];
-export function digitalSvg(id, hm, sec) {
+// 색 (on: 숫자 · off: 꺼진 칸 · bg: 바탕 · tile: 카드 · sub: 글자)
+export const DIGI_COLORS = [
+  { id: 'auto', name: '모양 기본색' },
+  { id: 'red', name: '레드', on: '#FF3B2F', off: '#2A1414', bg: '#0C0D0F', tile: '#1A1214', sub: '#B9B2AE' },
+  { id: 'sunset', name: '선셋 오렌지', on: '#FF8A3D', off: '#2C1A0F', bg: '#100A06', tile: '#1E140C', sub: '#C4A48C' },
+  { id: 'amber', name: '앰버', on: '#FFB020', off: '#2A2010', bg: '#0D0B07', tile: '#1C170E', sub: '#9C8B6E' },
+  { id: 'gold', name: '벨키퍼 골드', on: '#E0B25A', off: '#2E3A34', bg: '#17231F', tile: '#22302B', sub: '#C9D1CC' },
+  { id: 'green', name: '터미널 그린', on: '#3DFF7A', off: '#0F2A18', bg: '#050C07', tile: '#0E1A12', sub: '#7FBF95' },
+  { id: 'cyan', name: '네온 시안', on: '#5CFFD8', off: '#0E2A26', bg: '#06100F', tile: '#0C1E1B', sub: '#7FBFAF' },
+  { id: 'blue', name: '아이스 블루', on: '#7CC4FF', off: '#12263A', bg: '#070D16', tile: '#101C2C', sub: '#8FA6BF' },
+  { id: 'violet', name: '바이올렛', on: '#C29BFF', off: '#251A3A', bg: '#0D0916', tile: '#1B1430', sub: '#A797C2' },
+  { id: 'pink', name: '로즈 핑크', on: '#FF7EB6', off: '#2E1422', bg: '#120810', tile: '#22101B', sub: '#C49AAE' },
+  { id: 'white', name: '화이트', on: '#F4F5F2', off: '#1F2422', bg: '#0B0D0C', tile: '#171B19', sub: '#9AA5A0' },
+  { id: 'paper', name: '크림 종이', on: '#1E1E1C', off: '#E3DCCB', bg: '#F4F0E6', tile: '#FFFFFF', sub: '#6B7671', light: true },
+  { id: 'mint', name: '민트', on: '#1F5E4E', off: '#CFE6DD', bg: '#E8F3EE', tile: '#FFFFFF', sub: '#5A7A70', light: true },
+  { id: 'sky', name: '하늘', on: '#1F3E7A', off: '#D4E0F2', bg: '#EEF3FA', tile: '#FFFFFF', sub: '#5A6A85', light: true },
+  { id: 'peach', name: '복숭아', on: '#A8412B', off: '#F3D9CC', bg: '#FBEFE8', tile: '#FFFFFF', sub: '#8A6A5E', light: true }
+];
+const SPECIAL = {
+  lcd: { on: '#283022', off: '#A9B596', bg: '#2A2C2A', tile: '#B7C2A4', sub: '#B7C2A4' },
+  nixie: { on: '#FFB25A', off: '#3B2D24', bg: '#120D0A', tile: '#2A1E15', sub: '#FFB25A' },
+  obang: { on: '#1E1E1C', off: '#E3DCCB', bg: '#F4F0E6', tile: '#FFFFFF', sub: '#4A5752', light: true }
+};
+export function digiStyle(id) { return DIGI_STYLES.find(s => s.id === id) || DIGI_STYLES[0]; }
+// 실제로 쓸 색 (모양 기본색이면 모양마다 정해 둔 색)
+export function digiPalette(id, col) {
+  const st = digiStyle(id);
+  const pick = (!col || col === 'auto') ? st.col : col;
+  return SPECIAL[pick] || DIGI_COLORS.find(c => c.id === pick && c.on) || DIGI_COLORS[1];
+}
+export function digiShowSec(id, secOpt) {
+  const st = digiStyle(id);
+  if (st.fixed) return true;
+  if (secOpt === 'on') return true;
+  if (secOpt === 'off') return false;
+  return st.sec;
+}
+const p2 = n => String(n).padStart(2, '0');
+const T = (x, y, size, fill, txt, extra = '') => `<text x="${x}" y="${y}" text-anchor="middle" font-family="inherit" font-size="${size}" fill="${fill}" ${extra}>${txt}</text>`;
+const dgSvg = (vb, body, cls = '') => `<svg viewBox="${vb}" class="dg-svg ${cls}">${DGLOW}${body}</svg>`;
+
+export function digitalSvg(id, hm, sec, o = {}) {
+  sec = Number(sec) || 0;
+  const ss = p2(sec);
   const blink = sec % 2 === 1;
+  const C = digiPalette(id, o.col);
+  const custom = o.col && o.col !== 'auto';
+  const showSec = digiShowSec(id, o.sec);
+  const [hh, mm] = hm.split(':');
+
   if (id === 'led' || id === 'vfd' || id === 'lcd') {
-    const P = { led: ['#FF3B2F', '#1E1414', 22, 0.08, 'dGlow', 150, 270, 40], vfd: ['#5CFFD8', '#0E2A26', 16, 0.1, 'dGlow2', 140, 250, 44], lcd: ['#283022', '#A9B596', 18, 0.12, '', 120, 210, 34] }[id];
-    const r = segRow(hm, P[5], P[6], P[7], P[0], P[1], P[2], P[3], P[4], blink && id !== 'lcd');
-    if (id === 'lcd') return `<svg viewBox="-60 -70 ${r.w + 120} ${P[6] + 140}" class="dg-svg">${DGLOW}<rect x="-40" y="-50" width="${r.w + 80}" height="${P[6] + 100}" rx="16" fill="#B7C2A4"/>${r.s}</svg>`;
-    return `<svg viewBox="0 -20 ${r.w} ${P[6] + 40}" class="dg-svg">${DGLOW}${r.s}</svg>`;
+    const P = { led: [150, 270, 40, 22, 0.08, 'dGlow'], vfd: [140, 250, 44, 16, 0.1, 'dGlow2'], lcd: [120, 210, 34, 18, 0.12, ''] }[id];
+    const glow = C.light ? '' : P[5];
+    let on = C.on, off = C.off;
+    let panel = '';
+    if (id === 'lcd') {
+      const lightPanel = C.light ? C.bg : (custom ? C.on : '#B7C2A4');
+      on = C.light ? C.on : (custom ? '#141614' : '#283022'); off = 'rgba(0,0,0,.08)';
+      panel = lightPanel;
+    }
+    const r = segRow(hm, P[0], P[1], P[2], on, off, P[3], P[4], id === 'lcd' ? '' : glow, blink && id !== 'lcd');
+    let body = r.s, W = r.w;
+    if (showSec) {
+      const k = 0.5;
+      const r2 = segRow(ss, P[0] * k, P[1] * k, P[2] * k, on, off, P[3] * k, P[4], id === 'lcd' ? '' : glow, false);
+      body += `<g transform="translate(${W + 10} ${P[1] * (1 - k)})">${r2.s}</g>`;
+      W += r2.w + 10;
+    }
+    if (id === 'lcd') return dgSvg(`-60 -70 ${W + 120} ${P[1] + 140}`, `<rect x="-40" y="-50" width="${W + 80}" height="${P[1] + 100}" rx="16" fill="${panel}"/>${body}`);
+    return dgSvg(`0 -20 ${W} ${P[1] + 40}`, body);
   }
   if (id === 'nixie') {
     let s = '', x = 0;
-    for (const d of hm) {
-      if (d === ':') { s += `<circle cx="${x + 20}" cy="140" r="10" fill="#FF8A2A" filter="url(#dGlow)" opacity="${blink ? .3 : 1}"/><circle cx="${x + 20}" cy="220" r="10" fill="#FF8A2A" filter="url(#dGlow)" opacity="${blink ? .3 : 1}"/>`; x += 60; continue; }
-      s += `<rect x="${x}" y="0" width="190" height="340" rx="90" fill="#3B2D24" opacity=".6" stroke="#6E5A48" stroke-width="3"/>`;
-      for (let k = 0; k < 9; k++) s += `<line x1="${x + 20 + k * 19}" y1="30" x2="${x + 20 + k * 19}" y2="320" stroke="#4A3A2E" stroke-width="1.2"/>`;
-      s += `<text x="${x + 95}" y="270" text-anchor="middle" font-family="${SANS}" font-weight="300" font-size="260" fill="#FFB25A" filter="url(#dGlow2)">${d}</text>`;
-      x += 220;
-    }
-    return `<svg viewBox="-20 -20 ${x + 20} 380" class="dg-svg">${DGLOW}<rect x="-20" y="-20" width="${x + 20}" height="380" rx="20" fill="#2A1E15"/>${s}</svg>`;
+    const tube = (d, k) => {
+      const w = 190 * k, ht = 340 * k, y0 = 340 - ht;
+      let t = `<rect x="${x}" y="${y0}" width="${w}" height="${ht}" rx="${90 * k}" fill="${C.off}" opacity=".6" stroke="#6E5A48" stroke-width="3"/>`;
+      for (let i = 0; i < 9; i++) t += `<line x1="${x + (20 + i * 19) * k}" y1="${y0 + 30 * k}" x2="${x + (20 + i * 19) * k}" y2="${y0 + 320 * k}" stroke="#4A3A2E" stroke-width="1.2"/>`;
+      t += `<text x="${x + w / 2}" y="${y0 + 270 * k}" text-anchor="middle" font-family="${SANS}" font-weight="300" font-size="${260 * k}" fill="${C.on}" filter="url(#dGlow2)">${d}</text>`;
+      x += w + 30 * k; return t;
+    };
+    const colon = k => { const op = blink ? .3 : 1; const t = `<circle cx="${x + 20 * k}" cy="${340 - 200 * k}" r="${10 * k}" fill="${C.on}" filter="url(#dGlow)" opacity="${op}"/><circle cx="${x + 20 * k}" cy="${340 - 120 * k}" r="${10 * k}" fill="${C.on}" filter="url(#dGlow)" opacity="${op}"/>`; x += 60 * k; return t; };
+    for (const d of hh) s += tube(d, 1);
+    s += colon(1);
+    for (const d of mm) s += tube(d, 1);
+    if (showSec) { s += colon(.6); for (const d of ss) s += tube(d, .6); }
+    return dgSvg(`-20 -20 ${x + 20} 380`, `<rect x="-20" y="-20" width="${x + 20}" height="380" rx="20" fill="${C.tile}"/>${s}`);
   }
   if (id === 'dot') {
-    const d = 34; let s = '', cx = 0;
-    for (const ch of hm) { const m = DOT[ch]; for (let r = 0; r < 7; r++) for (let c = 0; c < m[r].length; c++) { const lit = m[r][c] === '1' && !(ch === ':' && blink); s += `<circle cx="${cx + c * d + d / 2}" cy="${r * d + d / 2}" r="${d * .38}" fill="${lit ? '#FFB020' : '#1D1810'}"/>`; } cx += (m[0].length + 1) * d; }
-    return `<svg viewBox="0 0 ${cx} ${7 * d}" class="dg-svg">${DGLOW}<g filter="url(#dGlow)">${s}</g></svg>`;
+    let s = '', cx = 0;
+    const put = (str, d, y0) => { for (const ch of str) { const m = DOT[ch]; for (let r = 0; r < 7; r++) for (let c = 0; c < m[r].length; c++) { const lit = m[r][c] === '1' && !(ch === ':' && blink); s += `<circle cx="${cx + c * d + d / 2}" cy="${y0 + r * d + d / 2}" r="${d * .38}" fill="${lit ? C.on : C.off}"/>`; } cx += (m[0].length + 1) * d; } };
+    const d = 34;
+    put(hm, d, 0);
+    if (showSec) { cx += d * .4; put(ss, d * .55, 7 * d * .45); }
+    return dgSvg(`0 0 ${cx} ${7 * d}`, `<g ${C.light ? '' : 'filter="url(#dGlow)"'}>${s}</g>`);
   }
   if (id === 'block') {
-    const cols = ['#1F4E9C', '#C8352A', '#F2B134', '#1E8C6E']; const ds = hm.replace(':', ''); let s = '';
-    [...ds].forEach((d, i) => { const x = i * 260 + (i >= 2 ? 60 : 0); s += `<rect x="${x}" y="0" width="230" height="320" rx="28" fill="${cols[i]}"/><text x="${x + 115}" y="250" text-anchor="middle" font-family="${SANS}" font-weight="900" font-size="250" fill="#FFFFFF">${d}</text>`; });
-    s += `<circle cx="535" cy="120" r="13" fill="#1E1E1C" opacity="${blink ? .3 : 1}"/><circle cx="535" cy="200" r="13" fill="#1E1E1C" opacity="${blink ? .3 : 1}"/>`;
-    return `<svg viewBox="0 0 1070 320" class="dg-svg">${s}</svg>`;
+    const cols = custom ? [C.on, C.on, C.on, C.on] : ['#1F4E9C', '#C8352A', '#F2B134', '#1E8C6E'];
+    const fg = custom ? C.bg : '#FFFFFF', dotc = custom ? C.on : '#1E1E1C';
+    const ds = hm.replace(':', ''); let s = '';
+    [...ds].forEach((d, i) => { const x = i * 260 + (i >= 2 ? 60 : 0); s += `<rect x="${x}" y="0" width="230" height="320" rx="28" fill="${cols[i]}"/><text x="${x + 115}" y="250" text-anchor="middle" font-family="${SANS}" font-weight="900" font-size="250" fill="${fg}">${d}</text>`; });
+    s += `<circle cx="535" cy="120" r="13" fill="${dotc}" opacity="${blink ? .3 : 1}"/><circle cx="535" cy="200" r="13" fill="${dotc}" opacity="${blink ? .3 : 1}"/>`;
+    let W = 1070;
+    if (showSec) { s += `<rect x="1110" y="140" width="220" height="180" rx="22" fill="${custom ? C.off : '#4A5752'}"/><text x="1220" y="280" text-anchor="middle" font-family="${SANS}" font-weight="900" font-size="150" fill="${custom ? C.on : '#FFFFFF'}">${ss}</text>`; W = 1330; }
+    return dgSvg(`0 0 ${W} 320`, s);
   }
   if (id === 'ring') {
     let s = ''; const cx = 300, cy = 300, r = 290;
-    for (let i = 0; i < 60; i++) { const a = i * Math.PI / 30, lit = i <= sec; s += `<line x1="${(cx + (r - 22) * Math.sin(a)).toFixed(1)}" y1="${(cy - (r - 22) * Math.cos(a)).toFixed(1)}" x2="${(cx + r * Math.sin(a)).toFixed(1)}" y2="${(cy - r * Math.cos(a)).toFixed(1)}" stroke="${lit ? '#E0B25A' : '#2E3D37'}" stroke-width="${i % 5 ? 5 : 8}" stroke-linecap="round"/>`; }
-    return `<svg viewBox="0 0 600 600" class="dg-svg ring">${s}<text x="300" y="345" text-anchor="middle" font-family="inherit" font-weight="900" font-size="150" fill="#F4F5F2">${hm}</text><text x="300" y="420" text-anchor="middle" font-family="inherit" font-weight="700" font-size="34" fill="#E0B25A">${sec}초</text></svg>`;
+    const lit = custom ? C.on : '#E0B25A', dim = custom ? C.off : '#2E3D37', num = custom ? C.on : '#F4F5F2';
+    for (let i = 0; i < 60; i++) { const a = i * Math.PI / 30, on = i <= sec; s += `<line x1="${(cx + (r - 22) * Math.sin(a)).toFixed(1)}" y1="${(cy - (r - 22) * Math.cos(a)).toFixed(1)}" x2="${(cx + r * Math.sin(a)).toFixed(1)}" y2="${(cy - r * Math.cos(a)).toFixed(1)}" stroke="${on ? lit : dim}" stroke-width="${i % 5 ? 5 : 8}" stroke-linecap="round"/>`; }
+    return dgSvg('0 0 600 600', `${s}${T(300, 345, 150, num, hm, 'font-weight="900"')}${T(300, 420, 34, lit, `${sec}초`, 'font-weight="700"')}`, 'ring');
   }
-  // thin
-  return `<svg viewBox="0 0 900 300" class="dg-svg"><text x="450" y="250" text-anchor="middle" font-family="inherit" font-weight="100" font-size="300" letter-spacing="-8" fill="#F4F5F2">${hm}</text></svg>`;
+  if (id === 'clean') {
+    // 큰 시:분 + 오른쪽 위 작은 초 (가장 깔끔한 모양)
+    const body = `<text x="20" y="250" font-family="inherit" font-weight="600" font-size="300" letter-spacing="-6" fill="${C.on}">${hm}</text>`
+      + (showSec ? `<text x="815" y="250" font-family="inherit" font-weight="500" font-size="110" fill="${C.on}" opacity=".55">${ss}</text>` : '');
+    return dgSvg(`0 0 ${showSec ? 980 : 820} 290`, body);
+  }
+  if (id === 'mono') {
+    // 같은 크기로 시:분:초 (가볍고 단정하게)
+    const txt = showSec ? `${hm}<tspan fill-opacity=".45">:${ss}</tspan>` : hm;
+    return dgSvg(`0 0 ${showSec ? 1200 : 820} 280`, `<text x="${showSec ? 600 : 410}" y="225" text-anchor="middle" font-family="inherit" font-weight="300" font-size="240" letter-spacing="2" fill="${C.on}" style="font-variant-numeric:tabular-nums">${txt}</text>`);
+  }
+  if (id === 'word') {
+    // 10시 09분 32초 — 숫자는 크게, 단위는 작게
+    const parts = [[String(Number(hh)), '시'], [mm, '분']].concat(showSec ? [[ss, '초']] : []);
+    let s = '', x = 0;
+    for (const [n, u] of parts) {
+      const nw = n.length * 138;
+      s += `<text x="${x}" y="230" font-family="inherit" font-weight="800" font-size="240" fill="${C.on}">${n}</text><text x="${x + nw + 6}" y="230" font-family="inherit" font-weight="500" font-size="90" fill="${C.sub}">${u}</text>`;
+      x += nw + 150;
+    }
+    return dgSvg(`-10 0 ${x} 270`, s);
+  }
+  if (id === 'cards') {
+    // 시·분·초 세 장의 카드
+    const items = [[hh, '시'], [mm, '분']].concat(showSec ? [[ss, '초']] : []);
+    let s = '', x = 0;
+    for (const [n, u] of items) {
+      s += `<rect x="${x}" y="0" width="300" height="300" rx="34" fill="${C.tile}" ${C.light ? 'stroke="#00000014" stroke-width="3"' : ''}/>`
+        + `<line x1="${x}" y1="150" x2="${x + 300}" y2="150" stroke="${C.bg}" stroke-width="5"/>`
+        + T(x + 150, 228, 210, C.on, n, 'font-weight="800" style="font-variant-numeric:tabular-nums"')
+        + T(x + 150, 350, 44, C.sub, u, 'font-weight="700"');
+      x += 340;
+    }
+    return dgSvg(`0 0 ${x - 40} 370`, s);
+  }
+  if (id === 'bar') {
+    // 큰 시:분 + 초 숫자 + 60칸 막대
+    let s = `<text x="0" y="230" font-family="inherit" font-weight="800" font-size="260" letter-spacing="-4" fill="${C.on}">${hm}</text>`
+      + `<text x="1000" y="230" text-anchor="end" font-family="inherit" font-weight="600" font-size="120" fill="${C.on}" opacity=".7">${ss}</text>`;
+    for (let i = 0; i < 60; i++) s += `<rect x="${i * 16.6}" y="280" width="11" height="${i % 5 ? 26 : 38}" rx="3" fill="${i <= sec ? C.on : C.off}"/>`;
+    return dgSvg('0 0 1000 330', s);
+  }
+  if (id === 'arc') {
+    // 큰 숫자 둘레로 초가 원호처럼 차오름
+    const cx = 300, cy = 300, r = 270, a = (sec + 1) / 60 * Math.PI * 2;
+    const ex = cx + r * Math.sin(a), ey = cy - r * Math.cos(a);
+    const arc = sec >= 59 ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.on}" stroke-width="16"/>`
+      : `<path d="M${cx} ${cy - r} A ${r} ${r} 0 ${a > Math.PI ? 1 : 0} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="${C.on}" stroke-width="16" stroke-linecap="round"/>`;
+    const s = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${C.off}" stroke-width="16"/>${arc}<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="14" fill="${C.on}"/>`
+      + T(300, 335, 170, C.on, hm, 'font-weight="300" letter-spacing="-4"') + T(300, 420, 56, C.sub, ss, 'font-weight="600"');
+    return dgSvg('0 0 600 600', s, 'ring');
+  }
+  if (id === 'studio') {
+    // 방송실 시계: 60개 점이 초마다 켜지고, 바깥 12점은 늘 켜짐
+    const cx = 300, cy = 300; let s = '';
+    for (let i = 0; i < 60; i++) { const a = i * Math.PI / 30; s += `<circle cx="${(cx + 230 * Math.sin(a)).toFixed(1)}" cy="${(cy - 230 * Math.cos(a)).toFixed(1)}" r="9" fill="${i <= sec ? C.on : C.off}"/>`; }
+    for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6; s += `<circle cx="${(cx + 272 * Math.sin(a)).toFixed(1)}" cy="${(cy - 272 * Math.cos(a)).toFixed(1)}" r="11" fill="${C.on}"/>`; }
+    const r = segRow(hm, 64, 120, 20, C.on, C.off, 11, 0.04, '', blink);
+    const r2 = segRow(ss, 38, 70, 12, C.on, C.off, 7, 0.04, '', false);
+    s += `<g transform="translate(${(300 - r.w / 2).toFixed(1)} 200)">${r.s}</g><g transform="translate(${(300 - r2.w / 2).toFixed(1)} 345)">${r2.s}</g>`;
+    return dgSvg('0 0 600 600', `<g ${C.light ? '' : 'filter="url(#dGlow)"'}>${s}</g>`, 'ring');
+  }
+  if (id === 'score') {
+    // 경기장 전광판: 칸마다 테두리, 아래에 시·분·초
+    const items = [[hh, '시'], [mm, '분']].concat(showSec ? [[ss, '초']] : []);
+    let s = '', x = 30;
+    for (const [n, u] of items) {
+      const r = segRow(n, 110, 200, 26, C.on, C.off, 18, 0.06, C.light ? '' : 'dGlow', false);
+      s += `<rect x="${x}" y="30" width="${r.w + 40}" height="260" rx="10" fill="${C.tile}" stroke="${C.sub}" stroke-opacity=".35" stroke-width="4"/>`
+        + `<g transform="translate(${x + 20} 60)">${r.s}</g>` + T(x + (r.w + 40) / 2, 345, 46, C.sub, u, 'font-weight="800" letter-spacing="8"');
+      x += r.w + 80;
+    }
+    return dgSvg(`0 0 ${x - 10} 370`, s);
+  }
+  if (id === 'stack') {
+    // 세로 포스터: 시 / 분 크게, 초는 색 띠
+    const s = `<text x="0" y="250" font-family="inherit" font-weight="900" font-size="300" letter-spacing="-10" fill="${C.on}">${hh}</text>`
+      + `<text x="0" y="540" font-family="inherit" font-weight="900" font-size="300" letter-spacing="-10" fill="${C.on}" opacity=".85">${mm}</text>`
+      + (showSec ? `<rect x="370" y="330" width="210" height="210" rx="105" fill="${C.on}"/>${T(475, 476, 120, C.bg, ss, 'font-weight="800"')}` : '')
+      + `<rect x="0" y="290" width="${showSec ? 580 : 340}" height="14" rx="7" fill="${C.on}" opacity=".35"/>`;
+    return dgSvg(`-10 -30 ${showSec ? 600 : 360} 600`, s, 'tall');
+  }
+  // thin (미니멀 얇은 글씨)
+  const txt = showSec ? `${hm}<tspan font-size="110" dx="18" fill-opacity=".5">${ss}</tspan>` : hm;
+  return dgSvg(`0 0 ${showSec ? 1100 : 900} 300`, `<text x="${showSec ? 550 : 450}" y="250" text-anchor="middle" font-family="inherit" font-weight="100" font-size="300" letter-spacing="-8" fill="${C.on}">${txt}</text>`);
 }
 
 // ── 한글 시계 ─────────────────────────────
@@ -267,3 +436,17 @@ export const HG_STYLES = [
   { id: 'tile', name: '오방색 칸', desc: '타일마다 색' },
   { id: 'sentence', name: '문장 시계', desc: '"오전 열 시 구 분이에요"' }
 ];
+
+// 설정 화면용: 디지털 모양·색·초 보이기 고르기 (재생기·관리자 공용)
+// attr(k, v) → 버튼에 붙일 data 속성 문자열
+export function digiPickerHtml(cur, attr, esc) {
+  const id = DIGI_STYLES.some(s => s.id === cur.digi) ? cur.digi : 'led';
+  const col = cur.dcol || 'auto', sec = cur.dsec || 'auto';
+  const st = digiStyle(id);
+  const mini = (sid, c) => { const C = digiPalette(sid, c); return `<span class="dg-mini" style="background:${C.bg}">${digitalSvg(sid, '10:09', 32, { col: c, sec })}</span>`; };
+  return `<div class="dg-grid">${DIGI_STYLES.map(d => `<button class="${id === d.id ? 'on' : ''}" ${attr('digi', d.id)}>${mini(d.id, col)}<span class="tiny">${esc(d.name)}${d.isNew ? ' <b class="dg-newb">NEW</b>' : ''}</span></button>`).join('')}</div>
+    <div class="small bold" style="margin-top:6px">색</div>
+    <div class="dc-grid">${DIGI_COLORS.map(c => { const C = c.on ? c : digiPalette(id, 'auto'); return `<button class="${col === c.id ? 'on' : ''}" ${attr('dcol', c.id)} title="${esc(c.name)}"><span class="dc-sw" style="background:${C.bg}"><b style="color:${C.on}">${c.on ? '12' : '자동'}</b></span><span class="tiny">${esc(c.name)}</span></button>`; }).join('')}</div>
+    <div class="small bold" style="margin-top:6px">초 보이기 ${st.fixed ? '<span class="tiny muted">· 이 모양은 늘 초가 보여요</span>' : ''}</div>
+    <div class="chips wrap">${[['auto', `모양 기본 (${st.sec ? '보임' : '안 보임'})`], ['on', '초 보이기'], ['off', '시:분만']].map(([v, t]) => `<button class="chip ${sec === v ? 'on' : ''}" ${attr('dsec', v)} ${st.fixed && v !== 'auto' ? 'disabled' : ''}>${t}</button>`).join('')}</div>`;
+}
