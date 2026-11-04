@@ -280,12 +280,54 @@ function startRunning() {
   showGate();
 }
 
-async function refreshOffset() {
-  if (PREVIEW || !P.saved) return;
+// ── 온라인 시계 맞추기 ─────────────────────────────────────
+// 모든 재생기가 같은 시각에 울리도록 기기 시계 대신 온라인(서버) 시각을 써요.
+//  ① 벨키퍼 서버(Firestore) 시각을 여러 번 재서 가장 빠르게 오간 값 사용 (오차 0.1~0.3초)
+//  ② 안 되면 웹 서버 응답의 시각(Date)으로 (오차 1초 안쪽)
+//  ③ 그래도 안 되면 마지막으로 맞춘 값을 기억해 두었다가 그대로 (새로 고침·인터넷 끊김에도 유지)
+//  실패하면 30초 → 1분 → 2분 … 5분 간격으로 다시 시도
+const LS_CLOCK = 'bk.clock';
+const CLOCK_SRC = { server: '서버 시간 기준', web: '인터넷 시간 기준', saved: '서버 시간 기준 (저장값)', device: '기기 시계 기준' };
+(() => {
   try {
-    const r = await Promise.race([F.measureServerOffset(myDoc()), new Promise(res => setTimeout(() => res(null), 8000))]);
-    if (r && r.rtt < 4000) { P.offset = r.offset; P.offsetOk = true; }
-  } catch (e) { console.warn(e); }
+    const c = JSON.parse(localStorage.getItem(LS_CLOCK) || 'null');
+    if (c && Number.isFinite(c.offset) && Date.now() - c.at < 7 * 86400000) { P.offset = c.offset; P.offsetOk = true; P.clock = 'saved'; }
+  } catch (e) { /* 무시 */ }
+})();
+const timeout = (p, ms) => Promise.race([p, new Promise(res => setTimeout(() => res(null), ms))]);
+async function webTime() {
+  const t0 = Date.now();
+  const r = await fetch(`version.json?clock=${t0}`, { cache: 'no-store' });
+  const t1 = Date.now();
+  const d = Date.parse(r.headers.get('date') || '');
+  if (!Number.isFinite(d) || t1 - t0 > 5000) return null;
+  return { offset: d + 500 - (t0 + (t1 - t0) / 2), rtt: t1 - t0 };   // Date는 초 단위라 0.5초를 더해 가운데로
+}
+let clockRetry = 0, clockTimer = 0, clockBusy = false;
+function setClock(off, src) {
+  P.offset = off; P.offsetOk = true; P.clock = src; P.clockAt = Date.now();
+  try { localStorage.setItem(LS_CLOCK, JSON.stringify({ offset: off, at: Date.now(), src })); } catch (e) { /* 무시 */ }
+}
+async function refreshOffset() {
+  if (PREVIEW || !P.saved || clockBusy) return;
+  clockBusy = true; clearTimeout(clockTimer);
+  let ok = false;
+  try {
+    let best = null;
+    for (let i = 0; i < 3; i++) {
+      try { const r = await timeout(F.measureServerOffset(myDoc()), 8000); if (r && r.rtt < 8000 && (!best || r.rtt < best.rtt)) best = r; } catch (e) { /* 다음 방법으로 */ }
+      if (best && best.rtt < 400) break;
+    }
+    if (best) { setClock(best.offset, 'server'); ok = true; }
+    else {
+      const w = await timeout(webTime().catch(() => null), 6000);
+      if (w) { setClock(w.offset, 'web'); ok = true; }
+    }
+  } finally { clockBusy = false; }
+  if (!P.clock) P.clock = P.offsetOk ? 'saved' : 'device';
+  clockRetry = ok ? 0 : clockRetry + 1;
+  clockTimer = setTimeout(refreshOffset, ok ? OFFSET_EVERY : Math.min(300000, 30000 * Math.pow(2, clockRetry - 1)));
+  if (P.running) draw();
 }
 
 function recompute() {
@@ -321,6 +363,7 @@ async function heartbeat() {
       version: APP_VERSION,
       mode: P.mode,
       autoplay: !!P.autoOk,
+      clock: P.clock || (P.offsetOk ? 'saved' : 'device'),
       ...(P.logSince || !P.devLoaded ? {} : { logSince: todayKey(now(), tz()) })
     });
     if (!P.logSince && P.devLoaded) P.logSince = todayKey(now(), tz());
@@ -421,7 +464,7 @@ function draw() {
   if (mode !== 'ink') el.dataset.ink = '';
   const online = navigator.onLine && !P.fromCache;
   const checks = [
-    [P.offsetOk, P.offsetOk ? '서버 시간 기준' : '기기 시계 기준'],
+    [P.offsetOk, CLOCK_SRC[P.clock || (P.offsetOk ? 'saved' : 'device')]],
     [true, '7일 일정 저장됨'],
     [!!P.wake || !('wakeLock' in navigator), P.wake ? '화면 켜짐 유지' : (('wakeLock' in navigator) ? '화면 켜짐 유지 안 됨' : '화면 꺼짐을 "안 함"으로')],
     [audioReady(), audioReady() ? '소리 준비됨' : '소리 대기']
@@ -736,7 +779,7 @@ function drawMenu() {
   } else {
     mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
       <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
-      <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · 기기 시계 오차 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 보정 중 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
+      <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · ${h(CLOCK_SRC[P.clock || 'device'])} · 이 기기 시계와 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 차이를 맞춰서 울려요 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
       <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button></section>`;
   }
   const tabsHtml = SET_TABS.map(([k, t]) => `<button class="${tab === k ? 'on' : ''}" data-pl="stab" data-v="${k}">${t}</button>`).join('');
@@ -935,7 +978,6 @@ setInterval(autoUpdateTick, 60 * 1000);
 setInterval(tick, 250);
 setInterval(() => { if (gate.classList.contains('hidden')) draw(); }, 1000);
 setInterval(heartbeat, HEARTBEAT_MS);
-setInterval(refreshOffset, OFFSET_EVERY);
 
 if (PREVIEW) {
   // 설정 화면 안의 미리 보기 창: 부모 화면의 일정을 받아 그리기만 함 (소리·기록 없음)

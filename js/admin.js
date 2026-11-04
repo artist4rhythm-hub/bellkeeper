@@ -864,11 +864,13 @@ function dayInfo(d, key, now) {
   }
   return { day, ok, miss, past, unknown };
 }
+const CLOCK_NAME = { server: '서버 시간', web: '인터넷 시간', saved: '서버 시간(저장값)', device: '기기 시계' };
 function devStatus(d) {
   const age = Date.now() - millis(d.lastSeen);
   if (age > 30 * 60000) return { cls: 'off', label: '꺼짐', sub: `${ago(millis(d.lastSeen))} 마지막` };
   if (age > ONLINE_MS) return { cls: 'warn', label: '응답 늦음', sub: `${ago(millis(d.lastSeen))} 응답` };
   if (d.status && d.status !== 'ready') return { cls: 'warn', label: '시작 대기', sub: '재생기에서 [재생 시작]을 눌러야 해요' };
+  if (d.clock === 'device') return { cls: 'warn', label: '시간 확인 안 됨', sub: '온라인 시각을 못 받아 기기 시계로 울리는 중' };
   if (d.version && S.update && cmpVer(S.update.latest, d.version) > 0) return { cls: 'ok', label: '정상', sub: `v${d.version} · ${S.space && S.space.autoUpd === false ? '업데이트 필요' : '자동 업데이트 예정'}` };
   return { cls: 'ok', label: '정상', sub: d.nextLabel ? `다음 ${d.nextLabel}` : '오늘 남은 종 없음' };
 }
@@ -1358,6 +1360,7 @@ function viewDevices() {
         + (S.groups.length ? ` · ${h(groupName(devGroup(d)))}` : '')
         + ` · 화면 ${h(styleName(d.display || d.mode))}`
         + (d.version ? ` · v${d.version}${old ? (S.space && S.space.autoUpd === false ? ' (업데이트 필요)' : ' (자동 업데이트 예정)') : ''}` : '')
+        + (d.clock === 'device' ? ' · <b style="color:var(--danger)">기기 시계 기준</b>' : d.clock ? ` · ${h(CLOCK_NAME[d.clock])}` : '')
         + (d.autoplay === true ? ' · 자동 시작 ✓' : d.autoplay === false ? ' · <b style="color:var(--danger)">자동 시작 안 됨</b>' : '');
       return `<button class="item" data-act="device" data-id="${h(d.id)}"><span class="dot ${on ? 'ok' : 'off'}"></span>
         <div class="grow"><div style="font-weight:500">${h(d.name || '재생기')}</div><div class="small muted">${detail}</div></div>
@@ -2122,7 +2125,7 @@ function sheetDevice(sh) {
       <div class="card stack tight small">
         <div><span class="dot ${on ? 'ok' : 'off'}"></span> <b>${on ? '정상' : '응답 없음'}</b> · ${ago(millis(d.lastSeen))} 마지막 응답</div>
         <div class="muted">지금 화면: ${h(styleName(d.mode))}${d.nextLabel ? ` · 다음 종 ${h(d.nextLabel)}` : ''}</div>
-        ${d.offsetMs != null ? `<div class="muted">기기 시계 오차: ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 (서버 시간으로 맞춰서 울려요)</div>` : ''}
+        ${d.offsetMs != null ? `<div class="${d.clock === 'device' ? '' : 'muted'}" ${d.clock === 'device' ? 'style="color:var(--danger)"' : ''}>시간 기준: ${h(CLOCK_NAME[d.clock] || '서버 시간')} · 기기 시계와 ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 차이${d.clock === 'device' ? ' — 온라인 시각을 아직 못 받았어요. 인터넷 연결을 확인해 주세요' : '를 맞춰서 울려요'}</div>` : ''}
         ${d.version ? `<div class="muted">버전 ${h(d.version)}${S.update && cmpVer(S.update.latest, d.version) > 0 ? ` · <b style="color:var(--danger)">새 버전 ${h(S.update.latest)} 있음</b> — 아래 [새로 고침]을 눌러 주세요` : ''}</div>` : ''}
         ${d.autoplay === true ? '<div class="muted">자동 시작 ✓ — 새로 고침·업데이트 뒤에도 저절로 소리가 나요</div>' : d.autoplay === false ? '<div style="color:var(--danger)">자동 시작 안 됨 — 새로 고침 뒤 재생기에서 [재생 시작]을 한 번 눌러야 해요 ([기기] › 자동 업데이트의 안내 참고)</div>' : ''}
         ${d.ua ? `<div class="muted ellipsis">${h(d.ua)}</div>` : ''}
