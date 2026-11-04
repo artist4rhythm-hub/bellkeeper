@@ -159,7 +159,7 @@ function showGate() {
     try { const u = JSON.parse(localStorage.getItem(LS_UPD) || 'null'); if (u && u.from !== APP_VERSION) localStorage.removeItem(LS_UPD); } catch (e) { /* 무시 */ }
     await unlockAudio();
     await keepAwake();
-    try { if (document.documentElement.requestFullscreen && matchMedia('(pointer:coarse)').matches) await document.documentElement.requestFullscreen(); } catch (e) { /* 무시 */ }
+    if (auto !== true) await enterFull();   // [재생 시작]을 누르면 전체 화면으로 (저절로 시작될 땐 브라우저가 막아서, 화면을 한 번 누르면 들어가요)
     gate.classList.add('hidden'); gate.dataset.kind = '';
     P.started = true;
     heartbeat();
@@ -234,7 +234,7 @@ function startRunning() {
     P.logSince = x.logSince || ''; P.devLoaded = true;
     if ((x.group || '') !== (P.group || '')) { P.group = x.group || ''; recompute(); if (gate.dataset.kind === 'start') fillGateGroups(); if (gate.dataset.kind === 'menu') drawMenu(); }
     const lockNow = !!x.locked && !!x.pinHash;
-    if (lockNow !== P.locked || (x.pinHash || '') !== P.pinHash) { P.locked = lockNow; P.pinHash = x.pinHash || ''; P.unlockedUntil = 0; redraw = true; if (!P.locked && gate.dataset.kind === 'pin') gate.classList.add('hidden'); }
+    if (lockNow !== P.locked || (x.pinHash || '') !== P.pinHash) { P.locked = lockNow; P.pinHash = x.pinHash || ''; P.unlockedUntil = 0; redraw = true; if (!P.locked && gate.dataset.kind === 'pin') gate.classList.add('hidden'); if (P.locked) lockKeys(); else unlockKeys(); setTimeout(fsHint, 0); }
     if (redraw) draw();
   }, onErr));
   // 인터넷 연결 표시: 서버와 연결됐는지(메타데이터)가 바뀔 때도 알려 달라고 해야 정확해요
@@ -885,6 +885,7 @@ async function pinKey(k) {
     }
     pinFails = 0;
     P.unlockedUntil = Date.now() + 3 * 60000;   // 3분 동안 풀림 → 저절로 다시 잠김
+    unlockKeys();
     gate.classList.add('hidden'); gate.dataset.kind = '';
     draw();
     if (pinNext === 'menu') openMenu();
@@ -892,18 +893,63 @@ async function pinKey(k) {
   } else if (/^\d$/.test(k) && pinBuf.length < 8) pinBuf += k;
   drawPin();
 }
+// ── 교실 잠금: 전체 화면 유지 + 키보드·마우스 잠금 ─────────────────────
+// 관리자 화면 › 기기 › 잠금을 켜면 적용돼요. 비밀번호를 넣으면 3분 동안 풀려요.
+// (Ctrl+Alt+Del, 윈도우키+L 같은 컴퓨터 자체 키는 웹에서 막을 수 없어요 → 완전히 막으려면 키오스크 모드)
+const lockActive = () => !PREVIEW && P.running && P.started && isLocked();
+const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+async function enterFull() {
+  if (PREVIEW || isFull()) return lockKeys();
+  const de = document.documentElement;
+  try { await (de.requestFullscreen ? de.requestFullscreen({ navigationUI: 'hide' }) : de.webkitRequestFullscreen && de.webkitRequestFullscreen()); } catch (e) { /* 누르기 없이 부르면 브라우저가 막음 */ }
+  lockKeys(); fsHint();
+}
+function lockKeys() {
+  // 전체 화면일 때만 쓸 수 있어요: Esc·Ctrl+W·Alt+Tab 같은 키도 화면이 받아서 막을 수 있게
+  try { if (lockActive() && isFull() && navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock().catch(() => {}); } catch (e) { /* 무시 */ }
+}
+function unlockKeys() { try { if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); } catch (e) { /* 무시 */ } }
+function fsHint() {
+  let el2 = document.getElementById('fs-hint');
+  const show = lockActive() && !isFull() && gate.classList.contains('hidden');
+  if (!show) { if (el2) el2.remove(); return; }
+  if (!el2) { el2 = document.createElement('div'); el2.id = 'fs-hint'; el2.className = 'fs-hint'; document.body.appendChild(el2); }
+  el2.innerHTML = `${LOCK}<b>잠긴 재생기예요</b><span>화면을 누르면 다시 전체 화면이 돼요 · 종은 그대로 울려요</span>`;
+}
+document.addEventListener('fullscreenchange', () => { if (isFull()) lockKeys(); else unlockKeys(); fsHint(); });
+// 잠겨 있으면: 어느 곳을 눌러도 먼저 전체 화면으로 돌아가고, 오른쪽 클릭·끌기·확대는 막아요
+document.addEventListener('pointerdown', e => {
+  if (!lockActive()) return;
+  if (!isFull()) { enterFull(); if (gate.dataset.kind !== 'pin' && !e.target.closest('[data-pl="unlock"]')) { e.preventDefault(); e.stopPropagation(); } }
+}, true);
+for (const ev of ['contextmenu', 'dragstart', 'selectstart', 'gesturestart']) document.addEventListener(ev, e => { if (lockActive()) e.preventDefault(); }, true);
+document.addEventListener('wheel', e => { if (lockActive() && (e.ctrlKey || e.metaKey)) e.preventDefault(); }, { passive: false, capture: true });
+let keyNotice = 0;
+document.addEventListener('keydown', e => {
+  if (!lockActive() || gate.dataset.kind === 'pin') return;
+  // 잠긴 동안은 모든 키를 막고, 키를 누르면 비밀번호 칸을 보여 줘요
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (Date.now() - keyNotice > 1500) { keyNotice = Date.now(); openPin('', '잠긴 재생기예요. 비밀번호를 넣어야 바꿀 수 있어요'); }
+}, true);
+// 마우스를 3초 동안 안 움직이면 화살표를 숨겨요 (TV·교실 화면용)
+let cursorTimer = 0;
+document.addEventListener('mousemove', () => {
+  document.body.classList.remove('nocursor'); clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => { if (gate.classList.contains('hidden')) document.body.classList.add('nocursor'); }, 3000);
+}, true);
+
 window.addEventListener('beforeunload', e => {
   // 잠긴 재생기는 실수로 닫히지 않게 한 번 더 물어봄
   if (P.locked && !P.allowLeave && P.running) { e.preventDefault(); e.returnValue = ''; }
 });
-setInterval(() => { if (P.locked && P.unlockedUntil && Date.now() > P.unlockedUntil) { P.unlockedUntil = 0; if (gate.dataset.kind === 'menu') { gate.classList.add('hidden'); gate.dataset.kind = ''; } draw(); } }, 5000);
+setInterval(() => { if (P.locked && P.unlockedUntil && Date.now() > P.unlockedUntil) { P.unlockedUntil = 0; lockKeys(); fsHint(); if (gate.dataset.kind === 'menu') { gate.classList.add('hidden'); gate.dataset.kind = ''; } draw(); } }, 5000);
 
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-pl]');
   if (!b) return;
   const a = b.dataset.pl;
   if (a === 'unlock') return openPin('');
-  if (a === 'relock') { P.unlockedUntil = 0; return draw(); }
+  if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); drawMenu(); mountPreview(); return; }
   if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); drawMenu(); mountPreview(); return; }
@@ -935,7 +981,7 @@ document.addEventListener('click', async e => {
     closeMenu();
   }
   if (a === 'mode') { P.mode = validMode(b.dataset.v); localStorage.setItem(LS_MODE, P.mode); P.pv = null; drawMenu(); mountPreview(); heartbeat(); }
-  if (a === 'fullscreen') { closeMenu(); try { await document.documentElement.requestFullscreen(); } catch (err) { /* 무시 */ } }
+  if (a === 'fullscreen') { closeMenu(); await enterFull(); }
   if (a === 'unlink') {
     if (!confirm('이 기기 연결을 해제할까요? 이 기기에서 더 이상 종이 울리지 않아요.')) return;
     try { await F.deleteDoc(myDoc()); } catch (err) { console.warn(err); }

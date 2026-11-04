@@ -2149,8 +2149,14 @@ function sheetDevice(sh) {
         <div class="tiny muted">새로 고침 뒤에는 브라우저에 따라 재생기에서 [재생 시작]을 한 번 눌러야 할 수 있어요.</div>
       </section>
       <section class="card stack">
-        <div class="row between"><div class="bold">잠금 (학생이 못 건드리게)</div><span class="badge ${d.locked ? 'dark' : ''}">${d.locked ? '잠김' : '꺼짐'}</span></div>
-        <div class="small muted">켜면 재생기의 설정·소리 시험·연결 해제 버튼이 숨고, 비밀번호를 넣어야 3분 동안 풀려요. 종은 그대로 울려요.</div>
+        <div class="row between"><div class="bold">교실 잠금 (학생이 못 건드리게)</div><span class="badge ${d.locked ? 'dark' : ''}">${d.locked ? '잠김' : '꺼짐'}</span></div>
+        <div class="small muted" style="line-height:1.7">켜면 비밀번호를 넣기 전까지:<br>
+          · <b>전체 화면 유지</b> — 빠져나가도 화면을 한 번 누르면 바로 다시 전체 화면<br>
+          · <b>키보드 잠금</b> — Esc·Ctrl+W·Alt+Tab 등 대부분의 키를 막고, 키를 누르면 비밀번호 칸이 떠요<br>
+          · <b>마우스 잠금</b> — 오른쪽 클릭·끌기·확대를 막고, 버튼(설정·소리 시험·연결 해제)은 숨겨요<br>
+          · 창을 닫으려 하면 한 번 더 물어봐요<br>
+          비밀번호를 넣으면 3분 동안 풀렸다가 저절로 다시 잠겨요. 종은 그대로 울려요.</div>
+        <div class="tiny muted">※ Ctrl+Alt+Del, 윈도우키+L, 전원 버튼처럼 컴퓨터 자체가 먼저 받는 키는 웹에서 막을 수 없어요. 완전히 막으려면 아래 "키오스크 모드" 안내대로 한 번 세팅해 주세요.</div>
         <div class="row" style="align-items:flex-end"><label class="field grow"><span>비밀번호 (숫자 4~8자리)</span><input class="input num" id="dv-pin" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="${d.pinHash ? '바꾸려면 새로 넣기' : '예: 2580'}"></label>
           <button class="btn primary" data-act="device-lock" data-id="${h(d.id)}">${d.locked ? '비밀번호 바꾸기' : '잠그기'}</button></div>
         ${d.locked ? `<button class="btn" data-act="device-unlock" data-id="${h(d.id)}">잠금 끄기</button>` : ''}
