@@ -14,6 +14,7 @@ import {
 } from './sounds.js';
 import { createRTA } from './rta.js';
 import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
+import * as G from './gyosa.js';
 import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts } from './themes.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
@@ -684,9 +685,10 @@ function viewGroups() {
       <td class="right"><button class="btn sm" data-act="${isBase ? 'group-base' : 'group-edit'}" data-id="${h(gid)}">편집</button></td></tr>`;
   };
   return `<div class="stack">
+    ${gyCheckNewer()}
     <div class="row between wrap"><div class="small muted" style="max-width:640px">학년·공간마다 요일별로 다른 일과표를 울려요. 재생기는 그룹 하나에 들어가요.
       그룹에서 <b>비워 둔 요일은 '${h(baseName())}'을 그대로 따라가요.</b></div>
-      <button class="btn primary" data-act="group-new">+ 그룹 만들기</button></div>
+      <div class="row wrap" style="gap:8px"><button class="btn" data-act="gy-open">교사 선교사 시간표 불러오기</button><button class="btn primary" data-act="group-new">+ 그룹 만들기</button></div></div>
     <div class="card hscroll"><table class="gp-table">
       <thead><tr><th>그룹</th>${DOWS.map(d => `<th>${DOW_LABELS[d]}</th>`).join('')}<th></th></tr></thead>
       <tbody>${row(BASE_GROUP, baseName(), true)}${S.groups.map(g => row(g.id, g.name, false)).join('')}</tbody></table>
@@ -1061,6 +1063,193 @@ function sheetMonDay(sh) {
       <button class="btn" data-act="date" data-key="${sh.key}">이날 일정 바꾸기</button></div>`);
 }
 
+// ── 교사 선교사 시간표 불러오기 (v1.13) ─────────────────────
+const GY_PAT = ['#2B7A8C', '#C0742A', '#7A4E9A', '#3E7A4F', '#B23A48', '#3D5A99'];
+const gyLink = () => (S.space && S.space.link && S.space.link.gyosa) || null;
+function gyFindGroup(grade) {
+  const re = new RegExp(`(^|[^0-9])${grade.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^0-9])`);
+  const g = S.groups.find(x => x.name === grade) || S.groups.find(x => re.test(x.name));
+  return g ? g.id : 'new';
+}
+function gyDefaultTpl(dept) {
+  const tts = S.timetables.filter(t => !(t.auto && t.auto.src === 'gyosa'));
+  const has = s => tts.find(t => String(t.name || '').includes(s));
+  const t = (dept && (has(dept.name) || has(dept.name.replace(/부$/, '')))) || tts[0] || S.timetables[0];
+  return t ? t.id : '';
+}
+function openGyosa() {
+  const L = gyLink();
+  openSheet({ type: 'gyosa', link: L ? L.id : '', data: null, err: '', busy: '', tpl: { ...((L && L.tpl) || {}) }, grades: {}, peek: null });
+  if (L && L.id) gyLoad(S.sheet);
+}
+async function gyLoad(sh) {
+  const inp = document.getElementById('gy-link');
+  if (inp) sh.link = inp.value;
+  const id = G.parseShareId(sh.link);
+  if (!id) { sh.err = '교사 선교사 › 완성 시간표 › [공유 링크]를 복사해서 붙여 넣어 주세요. (주소에 ?id=st_… 가 들어 있어요)'; return renderSheet(); }
+  sh.err = ''; sh.busy = '시간표를 읽는 중…'; renderSheet();
+  try {
+    const d = await G.fetchShare(id);
+    sh.id = id; sh.data = d; sh.busy = '';
+    const snap = d.snapshot, L = gyLink();
+    for (const dp of G.departmentsOf(snap)) if (!sh.tpl[dp.id] || !ttById(sh.tpl[dp.id])) sh.tpl[dp.id] = gyDefaultTpl(dp);
+    for (const g of G.gradesOf(snap)) {
+      const had = L && Array.isArray(L.grades) ? L.grades.includes(g) : true;
+      sh.grades[g] = sh.grades[g] || { on: had, group: gyFindGroup(g) };
+    }
+    const first = G.gradesOf(snap)[0];
+    sh.peek = first ? { grade: first, day: '월' } : null;
+  } catch (e) { sh.busy = ''; sh.err = e.message || '시간표를 읽지 못했어요'; console.warn(e); }
+  if (S.sheet === sh) renderSheet();
+}
+function gyWeek(sh, grade) {
+  const snap = sh.data.snapshot, dp = G.deptOf(snap, grade);
+  const t = ttById(sh.tpl[dp ? dp.id : ''] || '') || null;
+  return G.gradeWeek(snap, grade, t ? cleanBells(t.bells) : []);
+}
+const gyDate = ms => { if (!ms) return ''; const d = new Date(ms); return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+function sheetGyosa(sh) {
+  const d = sh.data, snap = d && d.snapshot;
+  let body = `<div class="card stack tight">
+    <div class="row" style="align-items:flex-end;gap:8px"><label class="field grow"><span>교사 선교사 「완성 시간표」 공유 링크</span>
+      <input class="input" id="gy-link" placeholder="https://…/share-timetable.html?id=st_…" value="${h(sh.link || '')}"></label>
+      <button class="btn primary" data-act="gy-load" ${sh.busy ? 'disabled' : ''}>${d ? '다시 읽기' : '불러오기'}</button></div>
+    <div class="tiny muted">교사 선교사 › 완성 시간표 › <b>공유 링크</b>를 켜고 [복사]해서 붙여 넣어요. 한 번 넣어 두면 다음부터는 저절로 들어가 있어요.
+      교사 선교사에서 새로 게시하면 같은 링크로 최신 시간표를 다시 가져올 수 있어요.</div>
+    ${sh.busy ? `<div class="small bold brass">${h(sh.busy)}</div>` : ''}${sh.err ? `<div class="small" style="color:var(--danger)">${h(sh.err)}</div>` : ''}</div>`;
+  if (snap) {
+    const grades = G.gradesOf(snap), depts = G.departmentsOf(snap);
+    const ttOpts = sel => S.timetables.map(t => `<option value="${h(t.id)}" ${t.id === sel ? 'selected' : ''}>${h(t.name)}</option>`).join('');
+    const weeks = {}; for (const g of grades) weeks[g] = gyWeek(sh, g);
+    const groupOpts = (g, sel) => `<option value="new" ${sel === 'new' ? 'selected' : ''}>+ 새 그룹 "${h(g)}"</option>` + S.groups.map(x => `<option value="${h(x.id)}" ${x.id === sel ? 'selected' : ''}>${h(x.name)}</option>`).join('');
+    const on = grades.filter(g => sh.grades[g] && sh.grades[g].on);
+    const nTt = on.length ? gyPlan(sh, on).pats.length : 0;
+    const nNew = on.filter(g => sh.grades[g].group === 'new').length;
+    const pk = sh.peek && weeks[sh.peek.grade] ? sh.peek : null;
+    const pkBells = pk ? weeks[pk.grade].days[pk.day].bells : [];
+    body += `
+    <div class="card stack tight"><div class="row wrap" style="gap:8px"><span class="badge gold">게시본</span><b>${h(d.title || '완성 시간표')}</b>
+      <span class="small muted">${h({ daniel: '다니엘 아마츠', jihyebit: '지혜빛 선교원' }[d.org] || '')}${d.publishedByName ? ` · ${h(d.publishedByName)} 게시` : ''}${d.publishedAt ? ` · ${gyDate(d.publishedAt)} 기준` : ''}</span></div></div>
+    <div class="field"><span>① 종소리 설정을 가져올 기준 일과표</span>
+      <div class="stack tight">${depts.map(dp => `<div class="gy-tpl"><b>${h(dp.name)}</b><span class="small muted">학년은</span>
+        <select class="input" data-gyt="${h(dp.id)}">${ttOpts(sh.tpl[dp.id])}</select><span class="small muted">의 종소리·안내 문구·배경음악·색을 그대로 써요</span></div>`).join('')}</div>
+      <div class="tiny muted">수업 시작 종 → N교시 시작, 수업 끝 종 → N교시 끝, "점심"·"조회"·"하교"처럼 이름이 같은 종 → 그 시간에 맞춰 넣어요. 안내 문구의 "1교시"는 교시 번호에 맞게 바뀌어요.</div></div>
+    <div class="field"><span>② 학년별 요일 시간 (교사 선교사 시간표에서 읽은 것) <span class="muted" style="font-weight:400">· 칸을 누르면 아래에 종 목록이 나와요 · 같은 색 = 같은 일과표</span></span>
+      <div class="card hscroll" style="padding:8px"><table class="gy-table"><thead><tr><th></th><th>학년</th>${G.GY_DAYS.map(x => `<th>${x}</th>`).join('')}<th>재생 그룹</th></tr></thead><tbody>
+      ${grades.map(g => { const w = weeks[g], st = sh.grades[g] || { on: true, group: 'new' }; return `<tr class="${st.on ? '' : 'off'}">
+        <td><input type="checkbox" data-gyon="${h(g)}" ${st.on ? 'checked' : ''} aria-label="${h(g)} 가져오기"></td>
+        <td><b>${h(g)}</b><div class="tiny muted">${h((G.deptOf(snap, g) || {}).name || '')}</div></td>
+        ${G.GY_DAYS.map(dy => { const b = w.days[dy].bells, pi = w.patterns.findIndex(p => p.days.includes(dy));
+          return `<td><button class="gy-cell ${pk && pk.grade === g && pk.day === dy ? 'on' : ''}" data-act="gy-peek" data-g="${h(g)}" data-d="${dy}" style="${b.length ? `--pc:${GY_PAT[pi % GY_PAT.length]}` : ''}">
+            ${b.length ? `<b>${b.length}개</b><span>${h(b[0].time)}~${h(b[b.length - 1].time)}</span>` : '<span class="muted">수업 없음</span>'}</button></td>`; }).join('')}
+        <td><select class="input sm" data-gygr="${h(g)}" ${st.on ? '' : 'disabled'}>${groupOpts(g, st.group)}</select></td></tr>`; }).join('')}
+      </tbody></table></div></div>
+    ${pk ? `<div class="card stack tight"><div class="row between"><b>${h(pk.grade)} · ${h(pk.day)}요일 종 ${pkBells.length}개</b><span class="tiny muted">${h(G.daysLabel(weeks[pk.grade].patterns.find(p => p.days.includes(pk.day)).days))} 같은 일과표</span></div>
+      <div class="gy-bells">${pkBells.map(b => `<div><span class="cdot" style="background:${bellColor(b).c}"></span><b class="num">${h(b.time)}</b><span class="grow">${h(b.label)}${b.say ? ` <span class="tiny muted">"${h(b.say)}"</span>` : ''}</span><span class="tiny muted">${h(soundName(b.soundId))}</span></div>`).join('') || '<div class="muted small">이날은 종이 없어요</div>'}</div></div>` : ''}
+    <div class="banner small"><b>적용하면</b> · 일과표 ${nTt}개를 만들거나 고쳐요 ("[교사선교사] 학년 · 요일" 이름, 시간이 똑같은 학년끼리는 하나로) · 재생 그룹 ${on.length}개의 월~금을 그 일과표로 맞춰요${nNew ? ` (새 그룹 ${nNew}개)` : ''} · 토·일과 재생기 배정은 그대로예요.
+      다시 불러오면 같은 일과표를 최신으로 고쳐요. 직접 만든 일과표(기준 일과표 포함)는 건드리지 않아요.</div>
+    <button class="btn primary lg block" data-act="gy-apply" ${sh.busy || !on.length ? 'disabled' : ''}>${sh.busy ? h(sh.busy) : `${on.length}개 학년 적용하기`}</button>`;
+  }
+  return sheetFrame('교사 선교사 시간표 불러오기', body, { wide: true });
+}
+function gySig(bells) { let x = 5381; const str = JSON.stringify(bells); for (let i = 0; i < str.length; i++) x = ((x * 33) ^ str.charCodeAt(i)) >>> 0; return x.toString(36); }
+function gyGradesLabel(gs) {
+  const n = gs.map(g => { const m = g.match(/^(\d+)학년$/); return m ? +m[1] : null; });
+  if (gs.length > 2 && n.every(v => v != null) && n.every((v, i) => !i || v === n[i - 1] + 1)) return `${n[0]}~${n[n.length - 1]}학년`;
+  return gs.join('·');
+}
+// 학년 여러 개 → 같은 종 목록은 일과표 하나로 (3~6학년이 같으면 하나만)
+function gyPlan(sh, grades) {
+  const pats = [];   // { sig, bells, uses: [{grade, days}] }
+  const perGrade = {};
+  for (const g of grades) {
+    const w = gyWeek(sh, g);
+    perGrade[g] = {};
+    for (const p of w.patterns) {
+      if (!p.bells.length) { for (const dy of p.days) perGrade[g][G.GY_DOW[dy]] = ''; continue; }
+      const bells = cleanBells(p.bells.map(({ _why, ...b }) => b));
+      const sig = gySig(bells);
+      let P = pats.find(x => x.sig === sig);
+      if (!P) pats.push(P = { sig, bells, uses: [] });
+      P.uses.push({ grade: g, days: p.days });
+      for (const dy of p.days) perGrade[g][G.GY_DOW[dy]] = sig;
+    }
+  }
+  for (const P of pats) {
+    const gs = [...new Set(P.uses.map(u => u.grade))];
+    const ds = G.GY_DAYS.filter(d => P.uses.some(u => u.days.includes(d)));
+    P.name = `[교사선교사] ${gyGradesLabel(gs)} · ${G.daysLabel(ds)}`.slice(0, 40);
+    P.grades = gs; P.days = ds.join('');
+  }
+  return { pats, perGrade };
+}
+async function gyApply(sh) {
+  const snap = sh.data && sh.data.snapshot; if (!snap) return;
+  const grades = G.gradesOf(snap).filter(g => sh.grades[g] && sh.grades[g].on);
+  if (!grades.length) return toast('가져올 학년을 골라 주세요');
+  const plan = gyPlan(sh, grades);
+  if (!confirm(`${grades.join(', ')}의 요일별 일과표를 교사 선교사 시간표에 맞춰 만들까요?\n일과표 ${plan.pats.length}개 · 재생 그룹 ${grades.length}개의 월~금이 바뀌어요.`)) return;
+  const step = t => { sh.busy = t; if (S.sheet === sh) renderSheet(); };
+  try {
+    const olds = S.timetables.filter(t => t.auto && t.auto.src === 'gyosa');
+    const taken = new Set(), idOf = {};
+    let i = 0;
+    for (const P of plan.pats) {
+      i++; step(`일과표 만드는 중… ${i}/${plan.pats.length}`);
+      let bells = P.bells;
+      if (googleOn() && bells.some(b => b.say && !b.sayId)) {
+        try { bells = await bellsWithTts(bells, (k, n) => step(`안내 음성 만드는 중… ${k}/${n}`)); }
+        catch (e) { ttsError(e); bells = await bellsWithKnownTts(bells); }
+      }
+      const auto = { src: 'gyosa', sig: P.sig, grades: P.grades, days: P.days };
+      const ex = olds.find(t => !taken.has(t.id) && t.auto.sig === P.sig) || olds.find(t => !taken.has(t.id) && t.name === P.name);
+      if (ex) { taken.add(ex.id); await F.updateDoc(F.doc(sub('timetables'), ex.id), { name: P.name, bells, auto, updatedAt: F.serverTimestamp() }); idOf[P.sig] = ex.id; }
+      else { const ref = await F.addDoc(sub('timetables'), { name: P.name, bells, auto, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() }); taken.add(ref.id); idOf[P.sig] = ref.id; }
+    }
+    // 재생 그룹: 월~금만 맞추고 토·일은 그대로
+    step('재생 그룹 맞추는 중…');
+    const touched = new Set();
+    for (const g of grades) {
+      const dayTt = {};
+      for (const k of [1, 2, 3, 4, 5]) { const v = plan.perGrade[g][k]; dayTt[k] = v ? idOf[v] : ''; }
+      const sel = sh.grades[g].group;
+      const ex = sel !== 'new' && S.groups.find(x => x.id === sel);
+      if (ex) {
+        touched.add(ex.id);
+        await F.updateDoc(F.doc(sub('groups'), ex.id), { days: { ...(ex.days || {}), ...dayTt }, updatedAt: F.serverTimestamp() });
+      } else {
+        const used = new Set(S.groups.map(x => x.color));
+        const ref = F.doc(sub('groups'));
+        touched.add(ref.id);
+        await F.setDoc(ref, { name: g.slice(0, 20), color: GROUP_COLORS.find(c => !used.has(c)) || GROUP_COLORS[0], days: dayTt, order: S.groups.length ? Math.max(...S.groups.map(x => Number(x.order) || 0)) + 1 : 1, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp() });
+        S.groups.push({ id: ref.id, name: g, color: '', days: dayTt });
+        sh.grades[g].group = ref.id;
+      }
+    }
+    // 이번에 안 쓰게 된 예전 자동 일과표 정리 (달력 규칙·다른 그룹에서 안 쓸 때만)
+    step('정리하는 중…');
+    const usedElse = id => S.rules.some(r => r.ttId === id || Object.values(r.days || {}).includes(id))
+      || S.groups.some(x => !touched.has(x.id) && Object.values(x.days || {}).includes(id));
+    for (const t of olds) if (!taken.has(t.id) && !usedElse(t.id)) await F.deleteDoc(F.doc(sub('timetables'), t.id)).catch(() => {});
+    await F.updateDoc(spaceRef(), { link: { gyosa: { id: sh.id, title: String(sh.data.title || '').slice(0, 60), pubAt: Number(sh.data.publishedAt || sh.data.updatedAt || 0), importedAt: Date.now(), tpl: sh.tpl, grades } } });
+    closeIf(sh);
+    toast(`일과표 ${plan.pats.length}개 · 재생 그룹 ${grades.length}개를 맞췄어요`);
+    S.tab = 'groups'; render();
+  } catch (e) { sh.busy = ''; fail(e, '적용하지 못했어요'); if (S.sheet === sh) renderSheet(); }
+}
+// 재생 그룹 화면을 열 때: 교사 선교사에 더 새 게시본이 있는지 (10분에 한 번)
+function gyCheckNewer() {
+  const L = gyLink();
+  if (!L || !L.id) return '';
+  const c = S.gyCheck;
+  if (!c || c.id !== L.id || Date.now() - c.at > 600000) {
+    S.gyCheck = { id: L.id, at: Date.now(), pubAt: (c && c.id === L.id) ? c.pubAt : 0 };
+    G.fetchShare(L.id).then(d => { S.gyCheck.pubAt = Number(d.publishedAt || d.updatedAt || 0); if (S.tab === 'groups' && !S.sheet) render(); }).catch(() => {});
+  }
+  const p = S.gyCheck.pubAt;
+  return p && p > Number(L.pubAt || 0) ? `<div class="banner row between wrap"><span><b>교사 선교사에 새 시간표가 게시됐어요</b> (${gyDate(p)}) — 다시 불러오면 학년별 일과표가 최신으로 바뀌어요.</span><button class="btn primary sm" data-act="gy-open">다시 불러오기</button></div>` : '';
+}
+
 // ── 일과표 목록 ─────────────────────────────────────
 function viewTimetables() {
   const used = id => ttInUse(id).length > 0;
@@ -1311,7 +1500,7 @@ function renderSheet() {
     'ring': sheetRing, 'date': sheetDate, 'rule': sheetRule,
     'tt-new': sheetTtNew, 'tt-templates': sheetTemplates, 'tt-edit': sheetTtEdit,
     'share': sheetShare, 'import': sheetImport, 'library': sheetLibrary,
-    'upload': sheetUpload, 'sound-menu': sheetSoundMenu, 'device': sheetDevice, 'group': sheetGroup, 'mon-day': sheetMonDay
+    'upload': sheetUpload, 'sound-menu': sheetSoundMenu, 'device': sheetDevice, 'group': sheetGroup, 'mon-day': sheetMonDay, 'gyosa': sheetGyosa
   }[sh.type];
   const old = sheetRoot.querySelector('.sheet');
   const keep = old && renderSheet._type === sh.type ? old.scrollTop : 0;
@@ -2515,6 +2704,10 @@ document.addEventListener('click', async e => {
       }
 
       // 기기
+      case 'gy-open': return openGyosa();
+      case 'gy-load': return gyLoad(sh);
+      case 'gy-peek': sh.peek = { grade: el.dataset.g, day: el.dataset.d }; return renderSheet();
+      case 'gy-apply': return gyApply(sh);
       case 'group-new': return openGroup(null);
       case 'group-edit': return openGroup(id);
       case 'group-base': return openGroup(BASE_GROUP);
@@ -2623,6 +2816,12 @@ document.addEventListener('input', e => {
     sh.draft[t.dataset.t] = t.dataset.t === 'rate' ? Number(t.value) : t.value;
     if (t.dataset.t === 'rate') { const l = document.getElementById('tts-rate-lab'); if (l) l.textContent = Number(t.value).toFixed(1); }
   }
+  if (sh.type === 'gyosa') {
+    if (t.id === 'gy-link') { sh.link = t.value; return; }
+    if (t.dataset.gyt) { sh.tpl[t.dataset.gyt] = t.value; return renderSheet(); }
+    if (t.dataset.gyon) { const g = sh.grades[t.dataset.gyon]; if (g) g.on = t.checked; return renderSheet(); }
+    if (t.dataset.gygr) { const g = sh.grades[t.dataset.gygr]; if (g) g.group = t.value; return renderSheet(); }
+  }
   if (sh.type === 'group') {
     if (t.dataset.g) sh.draft[t.dataset.g] = t.value;
     if (t.dataset.gd != null) { sh.draft.days = sh.draft.days || {}; sh.draft.days[t.dataset.gd] = t.value; const L = t.closest('label'); if (L) L.classList.toggle('set', sh.draft.id === BASE_GROUP ? !!t.value : t.value !== '_inherit'); }
@@ -2708,6 +2907,7 @@ document.addEventListener('dragend', () => {
 document.addEventListener('click', e => { if (e.target.classList && e.target.classList.contains('be-cb')) e.target._shift = e.shiftKey; }, true);
 document.addEventListener('keydown', e => {
   const sh = S.sheet;
+  if (sh && sh.type === 'gyosa' && e.key === 'Enter' && e.target.id === 'gy-link') { e.preventDefault(); gyLoad(sh); return; }
   if (sh && sh.type === 'tt-edit' && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && selList(sh).length) {
     e.preventDefault();
     if (edMove(sh, selList(sh), e.key === 'ArrowUp' ? -1 : 1)) renderSheet();

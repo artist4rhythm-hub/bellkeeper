@@ -1005,3 +1005,18 @@ body.preview .pl-gate, body.preview .pl-ringing { display: none !important; }
 @media (max-width: 699px) { .th-grid { grid-template-columns: 1fr 1fr; gap: 8px; } .th { padding: 8px; } .th .mini { height: 60px; } .th-tags, .th-go { display: none; } .th-crumb b { font-size: 16px; } .set-tabs button { font-size: 13px; padding: 8px 10px 10px; } }
 /* 관리자 [기기] 창 */
 .dv-theme { display: flex; flex-direction: column; gap: 12px; }
+
+/* v1.13 교사 선교사 시간표 불러오기 */
+.gy-tpl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gy-tpl select { width: auto; min-width: 240px; flex: 0 1 360px; }
+.gy-table { width: 100%; border-collapse: separate; border-spacing: 4px; min-width: 760px; }
+.gy-table th { font-size: 12px; color: var(--muted); text-align: left; padding: 2px 4px; }
+.gy-table td { vertical-align: middle; }
+.gy-table tr.off td:not(:first-child) { opacity: .4; }
+.gy-table select.sm { min-height: 36px; padding: 4px 8px; font-size: 13px; }
+.gy-cell { width: 100%; border: 1.5px solid var(--line); border-left: 6px solid var(--pc, var(--line)); background: var(--card); border-radius: 10px; padding: 6px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 0; text-align: left; color: var(--ink); min-width: 96px; }
+.gy-cell b { font-size: 14px; } .gy-cell span { font-size: 12px; color: var(--muted); }
+.gy-cell.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink) inset; }
+.gy-bells { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 16px; }
+.gy-bells > div { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #EFEBE2; font-size: 14px; }
+.gy-bells .num { width: 48px; }
