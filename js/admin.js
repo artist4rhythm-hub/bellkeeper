@@ -869,6 +869,7 @@ function devStatus(d) {
   if (age > 30 * 60000) return { cls: 'off', label: '꺼짐', sub: `${ago(millis(d.lastSeen))} 마지막` };
   if (age > ONLINE_MS) return { cls: 'warn', label: '응답 늦음', sub: `${ago(millis(d.lastSeen))} 응답` };
   if (d.status && d.status !== 'ready') return { cls: 'warn', label: '시작 대기', sub: '재생기에서 [재생 시작]을 눌러야 해요' };
+  if (d.version && S.update && cmpVer(S.update.latest, d.version) > 0) return { cls: 'ok', label: '정상', sub: `v${d.version} · ${S.space && S.space.autoUpd === false ? '업데이트 필요' : '자동 업데이트 예정'}` };
   return { cls: 'ok', label: '정상', sub: d.nextLabel ? `다음 ${d.nextLabel}` : '오늘 남은 종 없음' };
 }
 function srcLabel(day) {
@@ -1327,10 +1328,28 @@ function viewSounds() {
 
 // ── 기기 ─────────────────────────────────────
 function playUrlBase() { return new URL('play.html', location.href).href.replace(/\?.*$/, ''); }
+function autoUpdCard() {
+  const onUp = !(S.space && S.space.autoUpd === false);
+  const noAuto = S.devices.filter(d => d.autoplay === false);
+  return `<section class="card stack">
+    <div class="row between wrap"><b>재생기 자동 업데이트</b>
+      <div class="chips"><button class="chip ${onUp ? 'on' : ''}" data-act="auto-upd" data-v="1">켜기 (추천)</button><button class="chip ${onUp ? '' : 'on'}" data-act="auto-upd" data-v="0">끄기</button></div></div>
+    <div class="small muted" style="line-height:1.7">${onUp
+      ? '새 버전을 올리면 재생기가 <b>종과 종 사이 빈 시간</b>에 저절로 새로 고침해요 (종 3분 전·후와 울리는 중에는 안 해요). 재생기에 가서 누를 필요가 없어요.'
+      : '재생기는 직접 [새 버전 업데이트]를 누르거나, 여기서 [새로 고침·업데이트]를 보낼 때만 바뀌어요.'}</div>
+    ${onUp && noAuto.length ? `<div class="banner warn small"><b>자동 시작이 안 되는 재생기 ${noAuto.length}대</b> — ${h(noAuto.map(d => d.name || '재생기').join(', '))}<br>
+      이 재생기들은 새로 고침 뒤 [재생 시작]을 한 번 눌러야 소리가 나요. 그래서 <b>그날 수업이 다 끝난 뒤</b>에 업데이트하고, 다음 날 화면에 "한 번 눌러 주세요" 안내가 떠요.
+      <details style="margin-top:6px"><summary class="bold">누르지 않아도 되게 바꾸는 법</summary><div style="margin-top:6px;line-height:1.7">
+      · <b>크롬 앱으로 설치</b>: 재생기 화면에서 주소창 오른쪽 [설치] 아이콘(⊕) → 설치한 "벨키퍼 재생기" 앱으로 열기<br>
+      · <b>키오스크 바로가기</b> (Windows): 크롬 바로가기 속성 › 대상 끝에 <span class="num">--kiosk --autoplay-policy=no-user-gesture-required</span> 와 재생기 주소 붙이기<br>
+      · 바꾼 뒤 그 재생기를 한 번 다시 열면 여기서 "자동 시작 ✓"로 바뀌어요</div></details></div>` : ''}
+  </section>`;
+}
 function viewDevices() {
   const p = S.pair && S.pair.expiresAt > Date.now() ? S.pair : null;
   return `<div class="cols"><div class="c-main">
   <div class="section-title" style="margin-top:0"><h2>재생기 ${S.devices.length}대</h2><span class="tiny muted">관리자 ${(S.space && S.space.adminUids || []).length}명</span></div>
+  ${autoUpdCard()}
   <div class="list">
     ${S.devices.map(d => {
       const on = deviceOnline(d);
@@ -1338,7 +1357,8 @@ function viewDevices() {
       const detail = (on ? `${d.status === 'ready' ? '재생 중' : '재생 시작 버튼 대기'} · ${ago(millis(d.lastSeen))} 응답` : `${ago(millis(d.lastSeen))} 마지막 응답`)
         + (S.groups.length ? ` · ${h(groupName(devGroup(d)))}` : '')
         + ` · 화면 ${h(styleName(d.display || d.mode))}`
-        + (d.version ? ` · v${d.version}${old ? ' (업데이트 필요)' : ''}` : '');
+        + (d.version ? ` · v${d.version}${old ? (S.space && S.space.autoUpd === false ? ' (업데이트 필요)' : ' (자동 업데이트 예정)') : ''}` : '')
+        + (d.autoplay === true ? ' · 자동 시작 ✓' : d.autoplay === false ? ' · <b style="color:var(--danger)">자동 시작 안 됨</b>' : '');
       return `<button class="item" data-act="device" data-id="${h(d.id)}"><span class="dot ${on ? 'ok' : 'off'}"></span>
         <div class="grow"><div style="font-weight:500">${h(d.name || '재생기')}</div><div class="small muted">${detail}</div></div>
         <span class="small bold" style="color:${on ? 'var(--ok)' : 'var(--muted)'}">${on ? '정상' : '꺼짐'}</span></button>`;
@@ -2104,6 +2124,7 @@ function sheetDevice(sh) {
         <div class="muted">지금 화면: ${h(styleName(d.mode))}${d.nextLabel ? ` · 다음 종 ${h(d.nextLabel)}` : ''}</div>
         ${d.offsetMs != null ? `<div class="muted">기기 시계 오차: ${(Math.abs(d.offsetMs) / 1000).toFixed(1)}초 (서버 시간으로 맞춰서 울려요)</div>` : ''}
         ${d.version ? `<div class="muted">버전 ${h(d.version)}${S.update && cmpVer(S.update.latest, d.version) > 0 ? ` · <b style="color:var(--danger)">새 버전 ${h(S.update.latest)} 있음</b> — 아래 [새로 고침]을 눌러 주세요` : ''}</div>` : ''}
+        ${d.autoplay === true ? '<div class="muted">자동 시작 ✓ — 새로 고침·업데이트 뒤에도 저절로 소리가 나요</div>' : d.autoplay === false ? '<div style="color:var(--danger)">자동 시작 안 됨 — 새로 고침 뒤 재생기에서 [재생 시작]을 한 번 눌러야 해요 ([기기] › 자동 업데이트의 안내 참고)</div>' : ''}
         ${d.ua ? `<div class="muted ellipsis">${h(d.ua)}</div>` : ''}
       </div>
       <div class="row" style="align-items:flex-end"><label class="field grow"><span>이름</span><input class="input" id="dv-name" maxlength="30" value="${h(d.name || '')}"></label>
@@ -2731,6 +2752,11 @@ document.addEventListener('click', async e => {
         await F.updateDoc(F.doc(sub('devices'), id), { group: el.dataset.v === BASE_GROUP ? '' : el.dataset.v });
         const d = S.devices.find(x => x.id === id); if (d) d.group = el.dataset.v === BASE_GROUP ? '' : el.dataset.v;
         renderSheet(); return toast(`'${groupName(el.dataset.v)}' 그룹으로 옮겼어요 · 몇 초 안에 반영돼요`);
+      }
+      case 'auto-upd': {
+        const v = el.dataset.v === '1';
+        await F.updateDoc(spaceRef(), { autoUpd: v });
+        return toast(v ? '재생기가 새 버전을 저절로 받아요' : '자동 업데이트를 껐어요');
       }
       case 'pair-new': return newPairCode();
       case 'pair-group': { S.pairGroup = id; if (S.pair && S.pair.expiresAt > Date.now()) return newPairCode(); return render(); }

@@ -26,6 +26,7 @@ const FIRE_WINDOW = 20000;     // 정각을 놓쳐도 20초 안이면 울림
 const HEARTBEAT_MS = 60000;
 const OFFSET_EVERY = 15 * 60000;
 
+const LS_UPD = 'bk.autoUpdated';   // 자동 업데이트 기록
 const P = {
   uid: null, saved: null, space: null, timetables: [], rules: [], sounds: [], groups: [], group: '', logSince: '', devLoaded: false,
   offset: 0, offsetOk: false, running: false, unsub: [], seenCmd: null,
@@ -146,13 +147,16 @@ function showGate() {
   gate.innerHTML = `<div class="card stack loose center">
     <div style="color:var(--ink);display:flex;justify-content:center">${LOGO}</div>
     <div class="bold" style="font-size:22px">${h((P.space && P.space.name) || '벨키퍼')} · ${h(P.saved.name || '재생기')}</div>
+    ${(() => { try { const u = JSON.parse(localStorage.getItem(LS_UPD) || 'null'); return u && u.from !== APP_VERSION ? `<div class="banner" style="text-align:left"><b>벨키퍼가 v${h(u.from)} → v${h(APP_VERSION)}로 자동 업데이트됐어요.</b><br>종이 울리려면 아래 [재생 시작]을 한 번 눌러 주세요.</div>` : ''; } catch (e) { return ''; } })()}
     <div class="muted">브라우저가 소리를 낼 수 있도록 아래 버튼을 한 번 눌러주세요.</div>
     <div id="gate-grp" class="stack tight"></div>
     <button class="btn gold lg block" id="gate-go" style="min-height:64px;font-size:20px">재생 시작</button>
     <div class="tiny muted">화면을 켜 둔 채로 두세요. 이 기기를 껐다 켜면 다시 한 번 눌러야 해요.</div>
   </div>`;
   fillGateGroups();
-  const go = async () => {
+  const go = async (auto) => {
+    P.autoOk = auto === true;   // 누르지 않고 저절로 시작됐으면 = 자동 업데이트 뒤에도 혼자 다시 시작할 수 있는 기기
+    try { const u = JSON.parse(localStorage.getItem(LS_UPD) || 'null'); if (u && u.from !== APP_VERSION) localStorage.removeItem(LS_UPD); } catch (e) { /* 무시 */ }
     await unlockAudio();
     await keepAwake();
     try { if (document.documentElement.requestFullscreen && matchMedia('(pointer:coarse)').matches) await document.documentElement.requestFullscreen(); } catch (e) { /* 무시 */ }
@@ -165,7 +169,7 @@ function showGate() {
   // 원격 새로 고침 뒤 등: 누르지 않아도 소리를 낼 수 있는 브라우저면 바로 시작
   setTimeout(async () => {
     if (P.started || gate.classList.contains('hidden')) return;
-    try { if (await unlockAudio() && !P.started && document.getElementById('gate-go')) go(); } catch (e) { /* 무시 */ }
+    try { if (await unlockAudio() && !P.started && document.getElementById('gate-go')) go(true); } catch (e) { /* 무시 */ }
   }, 1500);
 }
 
@@ -316,6 +320,7 @@ async function heartbeat() {
       ua: navigator.userAgent.slice(0, 160),
       version: APP_VERSION,
       mode: P.mode,
+      autoplay: !!P.autoOk,
       ...(P.logSince || !P.devLoaded ? {} : { logSince: todayKey(now(), tz()) })
     });
     if (!P.logSince && P.devLoaded) P.logSince = todayKey(now(), tz());
@@ -898,10 +903,35 @@ document.addEventListener('click', async e => {
 window.addEventListener('online', () => { refreshOffset(); draw(); });
 window.addEventListener('offline', draw);
 
+// ── 자동 업데이트 ─────────────────────────────────────
+// 새 버전이 올라오면 종과 종 사이 빈 시간에 저절로 새로 고침해요.
+// 누르지 않으면 소리를 못 내는 기기(자동 시작 안 됨)는 오늘 수업이 다 끝난 뒤에 해요.
+function autoUpdateTick() {
+  if (PREVIEW || !P.running || !P.space || !P.update || !P.update.isNew) return;
+  if (P.space.autoUpd === false) return;                     // 관리자가 끔
+  if (P.ringing || gate.dataset.kind === 'menu' || gate.dataset.kind === 'pin') return;
+  const n = now(), key = todayKey(n, tz());
+  const near = P.upcoming.some(b => Math.abs(b.at - n) < 3 * 60000);
+  if (near) return;
+  if (P.started && !P.autoOk) {
+    // 다시 [재생 시작]을 눌러야 하는 기기: 오늘 남은 종이 없고 마지막 종 10분 뒤부터
+    const today = bellsForDay(key, P.rules, P.timetables, tz(), ctx()).bells;
+    const left = today.some(b => b.at > n);
+    const last = today.filter(b => b.at <= n).pop();
+    if (left || (last && n - last.at < 10 * 60000)) return;
+  }
+  // 방금 시도했는데 아직 옛 버전이면 (서버 반영 중) 30분 쉬었다가 다시
+  try { const u = JSON.parse(localStorage.getItem(LS_UPD) || 'null'); if (u && u.to === P.update.latest && u.from === APP_VERSION && Date.now() - u.at < 30 * 60000) return; } catch (e) { /* 무시 */ }
+  try { localStorage.setItem(LS_UPD, JSON.stringify({ from: APP_VERSION, to: P.update.latest, at: Date.now() })); } catch (e) { /* 무시 */ }
+  P.allowLeave = true;
+  reloadToLatest();
+}
+
 // ── 시작 ─────────────────────────────────────
 if (!PREVIEW && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-watchUpdates(u => { P.update = u; draw(); }, 30 * 60 * 1000);
+watchUpdates(u => { P.update = u; draw(); autoUpdateTick(); }, 10 * 60 * 1000);
+setInterval(autoUpdateTick, 60 * 1000);
 setInterval(tick, 250);
 setInterval(() => { if (gate.classList.contains('hidden')) draw(); }, 1000);
 setInterval(heartbeat, HEARTBEAT_MS);
