@@ -3070,7 +3070,7 @@ function mountPv() {
   if (!box || !fr) return;
   const [w, hh] = PV_SIZES[S.pvSize || 'tv'];
   fr.style.width = w + 'px'; fr.style.height = hh + 'px';
-  const fit = () => { const s = box.clientWidth / w; fr.style.transform = `scale(${s})`; box.style.height = (hh * s) + 'px'; };
+  const fit = () => { const s = box.clientWidth / w; fr.style.transform = `scale(${s})`; box.style.height = Math.floor(hh * s) + 'px'; };
   fit();
   if (pvRO) pvRO.disconnect();
   if (window.ResizeObserver) { pvRO = new ResizeObserver(fit); pvRO.observe(box); }

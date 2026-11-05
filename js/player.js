@@ -216,8 +216,16 @@ function startRunning() {
     if (!d.exists()) { if (!d.metadata.fromCache) disconnected(); return; }
     const x = d.data();
     // 관리자가 [기기] 화면에서 바꾼 값은 "바뀐 때만" 따름 (재생기에서 직접 바꾼 값도 존중)
-    const changed = k => { const v = x[k]; const was = P.seen[k]; P.seen[k] = v; return v !== undefined && v !== was; };
+    const first = !P.devLoaded;
+    // 재생기에서 방금 고른 값이 아직 서버로 가는 중이면 그 칸은 건드리지 않음
+    const changed = k => { if (k in syncPatch) return false; const v = x[k]; const was = P.seen[k]; P.seen[k] = v; return v !== undefined && v !== was; };
     let redraw = false;
+    // 예전 버전에서 재생기가 직접 고른 화면(mode)이 관리자 값(display)과 다르면, 재생기에서 고른 화면을 지킴
+    // (이번 업데이트 뒤 처음 한 번만 — 그다음부터는 서버 값이 기준)
+    if (first) {
+      let migrated = false; try { migrated = localStorage.getItem('bk.player.synced') === '1'; localStorage.setItem('bk.player.synced', '1'); } catch (e) { /* 무시 */ }
+      if (!migrated && x.display && x.mode && x.mode !== x.display && MODES.includes(x.mode) && x.mode === P.mode) pushSetting('mode', P.mode);
+    }
     if (changed('display') && MODES.includes(x.display) && x.display !== P.mode) { P.mode = x.display; try { localStorage.setItem(LS_MODE, P.mode); } catch (e) { /* 무시 */ } redraw = true; }
     if (changed('saver') && ['night', 'off'].includes(x.saver)) { P.opt.saver = x.saver; redraw = true; }
     if (changed('cycle') && [0, 15, 30, 60].includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
@@ -350,6 +358,21 @@ function recompute() {
   draw();
 }
 
+// 재생기에서 직접 고른 화면·옵션을 서버(기기 문서)에도 적어 둠
+// → 새로 고침·자동 업데이트 뒤에도, 관리자 화면에서도 같은 값이 보여요 (예전 값으로 돌아가지 않게)
+const SYNC_KEYS = { mode: 'display', saver: 'saver', cycle: 'cycle', vol: 'vol', font: 'font', dial: 'dial', abg: 'abg', art: 'art', digi: 'digi', dcol: 'dcol', dsec: 'dsec', hg: 'hg' };
+let syncTimer = null, syncPatch = {};
+function pushSetting(k, v) {
+  if (PREVIEW || !P.saved || !SYNC_KEYS[k]) return;
+  const f = SYNC_KEYS[k];
+  P.seen[f] = v;                       // 내가 쓴 값이 되돌아와도 "바뀜"으로 보지 않게
+  syncPatch[f] = v;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    const patch = syncPatch; syncPatch = {};
+    try { await F.updateDoc(myDoc(), patch); } catch (e) { console.warn('설정을 서버에 적지 못했어요 (보안 규칙을 새로 붙여 넣어 주세요)', e); }
+  }, 600);
+}
 async function heartbeat() {
   if (PREVIEW || !P.saved || !P.running) return;
   const next = P.upcoming.find(b => b.at > now());
@@ -822,7 +845,7 @@ function mountPreview() {
   if (!box || !fr) return;
   const [w, hh] = PV_SIZES[P.pvSize || 'tv'];
   fr.style.width = w + 'px'; fr.style.height = hh + 'px';
-  const fit = () => { const s = box.clientWidth / w; fr.style.transform = `scale(${s})`; box.style.height = (hh * s) + 'px'; };
+  const fit = () => { const s = box.clientWidth / w; fr.style.transform = `scale(${s})`; box.style.height = Math.floor(hh * s) + 'px'; };
   fit();
   if (P.pvRO) P.pvRO.disconnect();
   if (window.ResizeObserver) { P.pvRO = new ResizeObserver(fit); P.pvRO.observe(box); }
@@ -951,10 +974,10 @@ document.addEventListener('click', async e => {
   if (a === 'unlock') return openPin('');
   if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
-  if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); drawMenu(); mountPreview(); return; }
-  if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); drawMenu(); mountPreview(); return; }
-  if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
-  if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); pushSetting('saver', P.opt.saver); drawMenu(); mountPreview(); return; }
+  if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); pushSetting('cycle', P.opt.cycle); drawMenu(); mountPreview(); return; }
+  if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); pushSetting(a, P.opt[a]); P.pv = null; drawMenu(); mountPreview(); return; }
+  if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); pushSetting(b.dataset.k, P.opt[b.dataset.k]); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'stab') { P.setTab = b.dataset.v; P.setScrollTop = true; P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'theme') { P.setTheme = b.dataset.v; P.setOpt = themeOpts(b.dataset.v)[0]; P.setScrollTop = true; P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'theme-back') { P.setTheme = null; P.setScrollTop = true; P.pv = null; drawMenu(); return; }
@@ -980,7 +1003,7 @@ document.addEventListener('click', async e => {
     if (v) setDeviceVoicePref(v.value, Number(r.value) || 1);
     closeMenu();
   }
-  if (a === 'mode') { P.mode = validMode(b.dataset.v); localStorage.setItem(LS_MODE, P.mode); P.pv = null; drawMenu(); mountPreview(); heartbeat(); }
+  if (a === 'mode') { P.mode = validMode(b.dataset.v); try { localStorage.setItem(LS_MODE, P.mode); } catch (err) { /* 무시 */ } pushSetting('mode', P.mode); P.pv = null; drawMenu(); mountPreview(); heartbeat(); }
   if (a === 'fullscreen') { closeMenu(); await enterFull(); }
   if (a === 'unlink') {
     if (!confirm('이 기기 연결을 해제할까요? 이 기기에서 더 이상 종이 울리지 않아요.')) return;
@@ -1064,7 +1087,7 @@ if (PREVIEW) {
 }
 
 document.addEventListener('input', e => {
-  if (e.target.id === 'pl-vol') { P.opt.vol = Number(e.target.value); saveOpt(); const l = document.getElementById('pl-vol-lab'); if (l) l.textContent = P.opt.vol + '%'; }
+  if (e.target.id === 'pl-vol') { P.opt.vol = Number(e.target.value); saveOpt(); pushSetting('vol', P.opt.vol); const l = document.getElementById('pl-vol-lab'); if (l) l.textContent = P.opt.vol + '%'; }
 });
 document.addEventListener('keydown', e => {
   if (gate.dataset.kind === 'pin' && !gate.classList.contains('hidden')) {
