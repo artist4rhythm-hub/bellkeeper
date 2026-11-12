@@ -15,7 +15,7 @@ import {
 import { createRTA } from './rta.js';
 import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
 import * as G from './gyosa.js';
-import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts } from './themes.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay } from './themes.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
@@ -2160,13 +2160,17 @@ function sheetDevice(sh) {
         <div class="row" style="align-items:flex-end"><label class="field grow"><span>비밀번호 (숫자 4~8자리)</span><input class="input num" id="dv-pin" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="${d.pinHash ? '바꾸려면 새로 넣기' : '예: 2580'}"></label>
           <button class="btn primary" data-act="device-lock" data-id="${h(d.id)}">${d.locked ? '비밀번호 바꾸기' : '잠그기'}</button></div>
         ${d.locked ? `<button class="btn" data-act="device-unlock" data-id="${h(d.id)}">잠금 끄기</button>` : ''}
+        ${d.locked ? `<div class="tiny ${d.autofs === true ? 'ok-txt' : 'muted'}">${d.autofs === true ? '✓ 자동 전체 화면 켜짐 — 전체 화면이 풀려도 10초 뒤 저절로 돌아가요'
+          : d.autofs === false ? '자동 전체 화면이 꺼져 있어요 — 전체 화면이 풀리면 화면을 한 번 눌러야 돌아가요. 그 노트북에서 "자동전체화면_켜기.reg"를 한 번 실행해 주세요'
+          : '실수로 열린 비밀번호 칸은 10초 뒤 저절로 닫혀요. 전체 화면이 풀렸을 때 10초 뒤 저절로 돌아가려면 그 노트북에서 "자동전체화면_켜기.reg"를 한 번 실행해 주세요'}</div>` : ''}
       </section>
       <section class="card stack">      <div class="bold">화면 보호 (모니터가 타지 않게)</div>
         <div class="chips wrap"><button class="chip ${saver === 'night' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="night">수업 없을 때 화면 보호</button>
           <button class="chip ${saver === 'off' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="off">항상 고른 화면</button></div>
-        <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${cycle === v ? 'on' : ''}" data-act="device-cycle" data-id="${h(d.id)}" data-v="${v}">${t}</button>`).join('')}</div>
         <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면, 그리고 종이 없는 날은 검은 화면에 작은 시계가 떠다녀요.
           모든 화면은 1분마다 몇 픽셀씩 움직여서 같은 자리에 오래 머물지 않아요.</div></section>
+      <section class="card stack"><div class="bold">화면 모양 자동 바꾸기</div>
+        ${cycleHtml({ cycle, cycleSet: d.cycleSet || [], cycleOrd: d.cycleOrd || 'seq' }, d.display || d.mode || 'light', (k, v) => `data-act="device-cy" data-id="${h(d.id)}" data-k="${k}" data-v="${h(String(v))}"`, h)}</section>
       <details class="card small"><summary class="bold">노트북을 완전히 잠그려면 (키오스크 모드)</summary>
         <div class="stack tight muted" style="margin-top:8px;line-height:1.7">
           <div>· <b>Windows</b>: 설정 › 계정 › 기타 사용자 › <b>키오스크 설정</b>(할당된 액세스) → Microsoft Edge로 재생기 주소를 키오스크로 열기</div>
@@ -2796,6 +2800,14 @@ document.addEventListener('click', async e => {
         await F.updateDoc(F.doc(sub('devices'), id), patch);
         const d = S.devices.find(x => x.id === id); if (d) Object.assign(d, patch);
         S.pv = null; renderSheet(); mountPv(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
+      }
+      case 'device-cy': {
+        const d0 = S.devices.find(x => x.id === id) || {};
+        const patch = cyclePatch({ cycle: d0.cycle || 0, cycleSet: d0.cycleSet || [], cycleOrd: d0.cycleOrd || 'seq' }, el.dataset.k, el.dataset.v, d0.display || d0.mode || 'light');
+        if (!patch) return toast('적어도 한 화면은 남겨 두어야 해요');
+        await F.updateDoc(F.doc(sub('devices'), id), patch);
+        Object.assign(d0, patch);
+        renderSheet(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
       }
       case 'device-saver': case 'device-cycle': {
         const patch = act === 'device-saver' ? { saver: el.dataset.v } : { cycle: Number(el.dataset.v) };

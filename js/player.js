@@ -1,8 +1,8 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS } from './core.js';
-import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts } from './themes.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS, cycleMode, CYCLE_MINS } from './core.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay } from './themes.js';
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
@@ -218,7 +218,7 @@ function startRunning() {
     // 관리자가 [기기] 화면에서 바꾼 값은 "바뀐 때만" 따름 (재생기에서 직접 바꾼 값도 존중)
     const first = !P.devLoaded;
     // 재생기에서 방금 고른 값이 아직 서버로 가는 중이면 그 칸은 건드리지 않음
-    const changed = k => { if (k in syncPatch) return false; const v = x[k]; const was = P.seen[k]; P.seen[k] = v; return v !== undefined && v !== was; };
+    const changed = k => { if (k in syncPatch) return false; const v = x[k]; const was = P.seen[k]; P.seen[k] = v; return v !== undefined && JSON.stringify(v) !== JSON.stringify(was); };
     let redraw = false;
     // 예전 버전에서 재생기가 직접 고른 화면(mode)이 관리자 값(display)과 다르면, 재생기에서 고른 화면을 지킴
     // (이번 업데이트 뒤 처음 한 번만 — 그다음부터는 서버 값이 기준)
@@ -228,7 +228,9 @@ function startRunning() {
     }
     if (changed('display') && MODES.includes(x.display) && x.display !== P.mode) { P.mode = x.display; try { localStorage.setItem(LS_MODE, P.mode); } catch (e) { /* 무시 */ } redraw = true; }
     if (changed('saver') && ['night', 'off'].includes(x.saver)) { P.opt.saver = x.saver; redraw = true; }
-    if (changed('cycle') && [0, 15, 30, 60].includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
+    if (changed('cycle') && CYCLE_MINS.includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
+    if (changed('cycleSet') && Array.isArray(x.cycleSet)) { P.opt.cycleSet = x.cycleSet.filter(m => MODES.includes(m)); redraw = true; }
+    if (changed('cycleOrd') && ['seq', 'rand'].includes(x.cycleOrd)) { P.opt.cycleOrd = x.cycleOrd; redraw = true; }
     if (changed('font') && FONTS.some(f => f.id === x.font)) { P.opt.font = x.font; redraw = true; }
     if (changed('dial') && DIALS.some(f => f.id === x.dial)) { P.opt.dial = x.dial; redraw = true; }
     if (changed('abg') && ABGS.some(f => f.id === x.abg)) { P.opt.abg = x.abg; redraw = true; }
@@ -360,7 +362,7 @@ function recompute() {
 
 // 재생기에서 직접 고른 화면·옵션을 서버(기기 문서)에도 적어 둠
 // → 새로 고침·자동 업데이트 뒤에도, 관리자 화면에서도 같은 값이 보여요 (예전 값으로 돌아가지 않게)
-const SYNC_KEYS = { mode: 'display', saver: 'saver', cycle: 'cycle', vol: 'vol', font: 'font', dial: 'dial', abg: 'abg', art: 'art', digi: 'digi', dcol: 'dcol', dsec: 'dsec', hg: 'hg' };
+const SYNC_KEYS = { mode: 'display', saver: 'saver', cycle: 'cycle', cycleSet: 'cycleSet', cycleOrd: 'cycleOrd', vol: 'vol', font: 'font', dial: 'dial', abg: 'abg', art: 'art', digi: 'digi', dcol: 'dcol', dsec: 'dsec', hg: 'hg' };
 let syncTimer = null, syncPatch = {};
 function pushSetting(k, v) {
   if (PREVIEW || !P.saved || !SYNC_KEYS[k]) return;
@@ -458,12 +460,7 @@ function effectiveMode(n, day) {
     const off = !L.length || n < L[0].at - 30 * 60000 || n > L[L.length - 1].at + 15 * 60000;
     if (off && !P.ringing) return 'minimal';
   }
-  if (P.opt.cycle > 0 && P.mode !== 'minimal') {
-    const list = MODES.filter(m => m !== 'minimal');
-    const k = Math.floor(n / (P.opt.cycle * 60000));
-    return list[(list.indexOf(P.mode) + k) % list.length];
-  }
-  return P.mode;
+  return cycleMode(P.mode, P.opt, n);
 }
 // 화면 타는 것 방지: 1분마다 화면 전체를 몇 픽셀씩 옮김 (눈에는 거의 안 보임)
 function applyShift() {
@@ -773,6 +770,7 @@ function drawMenu() {
   let mainHtml = '';
   if (tab === 'screen' && !theme) {
     mainHtml = `<section class="set-card wide"><h4>화면 모양 <span class="tiny muted">누르면 그 모양에서 고를 수 있는 옵션만 나와요 · 노란 꼬리표 = 그 모양 전용 옵션</span></h4>
+      ${cycleWay(o) !== 'fixed' ? `<div class="cy-note">↻ 화면 모양 자동 바꾸기가 켜져 있어요 (${cycleWay(o) === 'pick' ? '고른 화면만' : '모든 화면'} · ${o.cycle >= 60 ? '1시간' : o.cycle + '분'}마다). 그래서 여기서 고른 모양이 잠깐 뒤 다른 모양으로 바뀔 수 있어요. <button class="linkbtn" data-pl="stab" data-v="saver">자동 바꾸기 설정 →</button></div>` : ''}
       ${themeGridHtml(P.mode, id => `data-pl="theme" data-v="${id}"`, h)}</section>`;
   } else if (tab === 'screen') {
     const ot = themeOpts(theme).includes(P.setOpt) ? P.setOpt : themeOpts(theme)[0];
@@ -789,8 +787,7 @@ function drawMenu() {
         <button class="chip ${o.saver === 'off' ? 'on' : ''}" data-pl="saver" data-v="off">항상 고른 화면</button></div>
       <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면 J 화면 보호로 바뀌어요. 1분마다 화면이 몇 픽셀씩 움직이는 기능은 항상 켜져 있어요.</div></section>
       <section class="set-card wide"><h4>화면 모양 자동 바꾸기</h4>
-      <div class="chips wrap">${[[0, '화면 그대로'], [15, '15분마다 바꾸기'], [30, '30분마다'], [60, '1시간마다']].map(([v, t]) => `<button class="chip ${o.cycle === v ? 'on' : ''}" data-pl="cycle" data-v="${v}">${t}</button>`).join('')}</div>
-      <div class="tiny muted">정해 둔 시간마다 화면 모양이 차례로 바뀌어요. 같은 화면이 오래 머물지 않아 모니터에도 좋아요.</div></section>`;
+      ${cycleHtml(o, P.mode, (k, v) => `data-pl="cy" data-k="${k}" data-v="${h(String(v))}"`, h)}</section>`;
   } else if (tab === 'sound') {
     mainHtml = `<section class="set-card wide"><h4>소리</h4>
       <label class="field"><span class="small bold">재생기 음량 <span id="pl-vol-lab">${o.vol}%</span></span><input type="range" id="pl-vol" min="10" max="100" step="5" value="${o.vol}"></label>
@@ -937,9 +934,32 @@ function fsHint() {
   const show = lockActive() && !isFull() && gate.classList.contains('hidden');
   if (!show) { if (el2) el2.remove(); return; }
   if (!el2) { el2 = document.createElement('div'); el2.id = 'fs-hint'; el2.className = 'fs-hint'; document.body.appendChild(el2); }
-  el2.innerHTML = `${LOCK}<b>잠긴 재생기예요</b><span>화면을 누르면 다시 전체 화면이 돼요 · 종은 그대로 울려요</span>`;
+  const left = Math.max(0, Math.ceil((AUTO_BACK_MS - (Date.now() - quietSince())) / 1000));
+  const msg = autoFsOk === false ? '화면을 한 번 누르면 다시 전체 화면이 돼요 · 종은 그대로 울려요'
+    : left > 0 ? `${left}초 뒤 저절로 전체 화면으로 돌아가요 · 바로 하려면 화면을 누르세요` : '전체 화면으로 돌아가는 중… 안 되면 화면을 한 번 눌러 주세요';
+  el2.innerHTML = `${LOCK}<b>잠긴 재생기예요</b><span>${msg}</span>`;
 }
-document.addEventListener('fullscreenchange', () => { if (isFull()) lockKeys(); else unlockKeys(); fsHint(); });
+// ── 10초 동안 아무도 안 만지면 원래대로 (v1.17) ──
+// · 실수로 열린 비밀번호 칸은 닫고
+// · 전체 화면이 풀려 있으면 다시 전체 화면으로 (브라우저가 "자동 전체 화면"을 허용한 노트북에서만 — 안내의 설정 파일)
+const AUTO_BACK_MS = 10000;
+let lastInput = Date.now(), fsExitAt = 0, lastFsTry = 0, autoFsOk = null, autoFsSent = null;
+const quietSince = () => Math.max(lastInput, fsExitAt);   // 마지막으로 만졌거나 전체 화면이 풀린 때
+for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) document.addEventListener(ev, () => { lastInput = Date.now(); }, { capture: true, passive: true });
+async function autoFull() {
+  const de = document.documentElement;
+  try { await (de.requestFullscreen ? de.requestFullscreen({ navigationUI: 'hide' }) : Promise.reject(new Error('no api'))); autoFsOk = true; }
+  catch (e) { autoFsOk = false; }
+  if (autoFsOk !== autoFsSent && P.saved) { autoFsSent = autoFsOk; F.updateDoc(myDoc(), { autofs: autoFsOk }).catch(() => { /* 규칙을 안 바꾼 경우 — 무시 */ }); }
+  lockKeys(); fsHint();
+}
+setInterval(() => {
+  if (!lockActive()) return;
+  if (!isFull() && gate.classList.contains('hidden')) fsHint();       // 남은 초 고치기
+  if (gate.dataset.kind === 'pin' && Date.now() - lastInput >= AUTO_BACK_MS) { pinBuf = ''; gate.classList.add('hidden'); gate.dataset.kind = ''; draw(); fsHint(); }
+  if (!isFull() && gate.classList.contains('hidden') && Date.now() - quietSince() >= AUTO_BACK_MS && Date.now() - lastFsTry >= AUTO_BACK_MS) { lastFsTry = Date.now(); autoFull(); }
+}, 1000);
+document.addEventListener('fullscreenchange', () => { if (isFull()) lockKeys(); else { unlockKeys(); fsExitAt = Date.now(); } fsHint(); });
 // 잠겨 있으면: 어느 곳을 눌러도 먼저 전체 화면으로 돌아가고, 오른쪽 클릭·끌기·확대는 막아요
 document.addEventListener('pointerdown', e => {
   if (!lockActive()) return;
@@ -975,7 +995,13 @@ document.addEventListener('click', async e => {
   if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); pushSetting('saver', P.opt.saver); drawMenu(); mountPreview(); return; }
-  if (a === 'cycle') { P.opt.cycle = Number(b.dataset.v); saveOpt(); pushSetting('cycle', P.opt.cycle); drawMenu(); mountPreview(); return; }
+  if (a === 'cy') {
+    const patch = cyclePatch(P.opt, b.dataset.k, b.dataset.v, P.mode);
+    if (!patch) return;
+    Object.assign(P.opt, patch); saveOpt();
+    for (const [k, v] of Object.entries(patch)) pushSetting(k, v);
+    drawMenu(); mountPreview(); return;
+  }
   if (a === 'dial' || a === 'font') { P.opt[a] = b.dataset.v; saveOpt(); pushSetting(a, P.opt[a]); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'opt') { P.opt[b.dataset.k] = b.dataset.v; saveOpt(); pushSetting(b.dataset.k, P.opt[b.dataset.k]); P.pv = null; drawMenu(); mountPreview(); return; }
   if (a === 'stab') { P.setTab = b.dataset.v; P.setScrollTop = true; P.pv = null; drawMenu(); mountPreview(); return; }

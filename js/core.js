@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.16.1';
+export const APP_VERSION = '1.17.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -377,4 +377,40 @@ export function cleanBells(bells) {
     })
     .sort((a, b) => timeToSec(a.time) - timeToSec(b.time))
     .slice(0, 100);
+}
+
+// ── 화면 모양 자동 바꾸기 (v1.17) ───────────────────────────────
+// cycle: 몇 분마다(0 = 고정) · cycleSet: 돌릴 화면들([] = 모든 화면) · cycleOrd: 'seq' 차례로 / 'rand' 무작위
+export const CYCLE_MINS = [0, 5, 10, 15, 30, 60];
+export const CYCLE_ORDS = ['seq', 'rand'];
+const ALL_MODES = ['light', 'dark', 'board', 'big', 'period', 'analog', 'analog2', 'analog3', 'date', 'flip', 'minimal', 'ink', 'digital', 'hangul'];
+function slotHash(k) { let x = (k * 2654435761) >>> 0; x ^= x >>> 16; x = Math.imul(x, 2246822507) >>> 0; x ^= x >>> 13; return x >>> 0; }
+export function cycleList(base, opt) {
+  const set = Array.isArray(opt.cycleSet) ? opt.cycleSet.filter(m => ALL_MODES.includes(m)) : [];
+  if (set.length) return [...new Set(set)];
+  return ALL_MODES.filter(m => m !== 'minimal');
+}
+// n(ms)일 때 보여 줄 화면 — 같은 시간 칸 안에서는 늘 같은 화면이라 기기끼리도 맞아요
+export function cycleMode(base, opt, n) {
+  const min = Number(opt.cycle) || 0;
+  if (min <= 0) return base;
+  const picked = Array.isArray(opt.cycleSet) && opt.cycleSet.length > 0;
+  if (!picked && base === 'minimal') return base;
+  const list = cycleList(base, opt);
+  if (list.length < 2) return list[0] || base;
+  const k = Math.floor(n / (min * 60000));
+  if (opt.cycleOrd === 'rand' && list.length > 2) {   // 2개뿐이면 번갈아 보여 주는 것이 곧 무작위
+    // 한 바퀴(고른 화면 수만큼)마다 순서를 섞어서 → 모든 화면이 골고루, 같은 화면이 연달아 나오지 않게
+    const L = list.length, r = Math.floor(k / L), pos = ((k % L) + L) % L;
+    const perm = rr => {
+      const a = list.slice();
+      for (let i = L - 1; i > 0; i--) { const j = slotHash(rr * 31 + i) % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+      return a;
+    };
+    const cur = perm(r);
+    if (cur[0] === perm(r - 1)[L - 1]) [cur[0], cur[1]] = [cur[1], cur[0]];   // 바퀴가 넘어갈 때 겹치면 앞 두 개 바꾸기
+    return cur[pos];
+  }
+  const start = Math.max(0, list.indexOf(base));
+  return list[(start + k) % list.length];
 }
