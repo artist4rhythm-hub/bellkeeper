@@ -1,8 +1,8 @@
 // 벨키퍼 재생기 — PC·태블릿에서 정해진 시간에 종을 울립니다.
 import * as F from './fb.js';
 import {
-  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS, cycleMode, CYCLE_MINS } from './core.js';
-import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay } from './themes.js';
+  APP_VERSION, todayKey, koreanDate, upcomingBells, bellsForDay, schedCtx, fmtRemain, fmtClock, escapeHtml as h, cleanBells, PLAYER_STYLES, styleName, DOW_LABELS, bellColor, DIALS, FONTS, loadFont, fontCss, ABGS, INK_ARTS, DIGIS, DCOLS, DSECS, HGS, cycleMode, CYCLE_MINS, SAVERS, NIGHT_FROM, NIGHT_TO, CBGS, screenZone, autoClockBg } from './core.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay, screenTimeHtml, clockScreenHtml, screenPatch } from './themes.js';
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
@@ -33,7 +33,7 @@ const P = {
   mode: validMode(localStorage.getItem(LS_MODE)),
   upcoming: [], upcomingAt: 0, fromCache: false, wake: null, ringing: null, started: false, update: null,
   // 화면 보호·음량·잠금 (관리자가 원격으로 바꾸면 그대로 따름)
-  opt: Object.assign({ saver: 'night', cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', dcol: 'auto', dsec: 'auto', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
+  opt: Object.assign({ saver: 'clock', nightFrom: 24, nightTo: 5, offDay: 'clock', cbg: 'auto', cdial: 'classic', cdim: true, cycle: 0, vol: 100, font: 'noto', dial: 'classic', abg: 'plain', art: 'auto', digi: 'led', dcol: 'auto', dsec: 'auto', hg: 'gold' }, (() => { try { return JSON.parse(localStorage.getItem(LS_OPT) || '{}'); } catch (e) { return {}; } })()),
   locked: false, pinHash: '', unlockedUntil: 0, seen: {}
 };
 function saveOpt() { if (PREVIEW) return; try { localStorage.setItem(LS_OPT, JSON.stringify(P.opt)); } catch (e) { /* 무시 */ } }
@@ -227,7 +227,14 @@ function startRunning() {
       if (!migrated && x.display && x.mode && x.mode !== x.display && MODES.includes(x.mode) && x.mode === P.mode) pushSetting('mode', P.mode);
     }
     if (changed('display') && MODES.includes(x.display) && x.display !== P.mode) { P.mode = x.display; try { localStorage.setItem(LS_MODE, P.mode); } catch (e) { /* 무시 */ } redraw = true; }
-    if (changed('saver') && ['night', 'off'].includes(x.saver)) { P.opt.saver = x.saver; redraw = true; }
+    if (first && x.saver === undefined) pushSetting('saver', SAVERS.includes(P.opt.saver) ? P.opt.saver : 'clock');   // 서버에 아직 없으면 지금 값을 알려 줌
+    if (changed('saver') && SAVERS.includes(x.saver)) { P.opt.saver = x.saver; redraw = true; }
+    if (changed('nightFrom') && NIGHT_FROM.includes(x.nightFrom)) { P.opt.nightFrom = x.nightFrom; redraw = true; }
+    if (changed('nightTo') && NIGHT_TO.includes(x.nightTo)) { P.opt.nightTo = x.nightTo; redraw = true; }
+    if (changed('offDay') && ['clock', 'saver'].includes(x.offDay)) { P.opt.offDay = x.offDay; redraw = true; }
+    if (changed('cbg') && CBGS.includes(x.cbg)) { P.opt.cbg = x.cbg; redraw = true; }
+    if (changed('cdial') && DIALS.some(d => d.id === x.cdial)) { P.opt.cdial = x.cdial; redraw = true; }
+    if (changed('cdim') && typeof x.cdim === 'boolean') { P.opt.cdim = x.cdim; redraw = true; }
     if (changed('cycle') && CYCLE_MINS.includes(x.cycle)) { P.opt.cycle = x.cycle; redraw = true; }
     if (changed('cycleSet') && Array.isArray(x.cycleSet)) { P.opt.cycleSet = x.cycleSet.filter(m => MODES.includes(m)); redraw = true; }
     if (changed('cycleOrd') && ['seq', 'rand'].includes(x.cycleOrd)) { P.opt.cycleOrd = x.cycleOrd; redraw = true; }
@@ -362,7 +369,7 @@ function recompute() {
 
 // 재생기에서 직접 고른 화면·옵션을 서버(기기 문서)에도 적어 둠
 // → 새로 고침·자동 업데이트 뒤에도, 관리자 화면에서도 같은 값이 보여요 (예전 값으로 돌아가지 않게)
-const SYNC_KEYS = { mode: 'display', saver: 'saver', cycle: 'cycle', cycleSet: 'cycleSet', cycleOrd: 'cycleOrd', vol: 'vol', font: 'font', dial: 'dial', abg: 'abg', art: 'art', digi: 'digi', dcol: 'dcol', dsec: 'dsec', hg: 'hg' };
+const SYNC_KEYS = { mode: 'display', saver: 'saver', nightFrom: 'nightFrom', nightTo: 'nightTo', offDay: 'offDay', cbg: 'cbg', cdial: 'cdial', cdim: 'cdim', cycle: 'cycle', cycleSet: 'cycleSet', cycleOrd: 'cycleOrd', vol: 'vol', font: 'font', dial: 'dial', abg: 'abg', art: 'art', digi: 'digi', dcol: 'dcol', dsec: 'dsec', hg: 'hg' };
 let syncTimer = null, syncPatch = {};
 function pushSetting(k, v) {
   if (PREVIEW || !P.saved || !SYNC_KEYS[k]) return;
@@ -454,11 +461,12 @@ function bigDate(z) { return { y: z.y, md: `${z.m}월 ${z.d}일`, dow: `${DOW_LA
 function analogSvg(z, dark, dial) { return clockSvg(z, dial || P.opt.dial || 'classic'); }
 // 쉬는 시간·밤에는 화면 보호, 정해 둔 시간마다 화면 바꾸기
 function effectiveMode(n, day) {
-  if (PREVIEW) return P.mode;
-  if (P.opt.saver === 'night') {
-    const L = day.bells;
-    const off = !L.length || n < L[0].at - 30 * 60000 || n > L[L.length - 1].at + 15 * 60000;
-    if (off && !P.ringing) return 'minimal';
+  if (PREVIEW) return P.opt.__clock ? 'clockscr' : P.mode;
+  if (!P.ringing) {
+    const z = fmtClock(n, tz()).z;
+    const zone = screenZone(P.opt, day.bells, n, z.h + z.mi / 60);
+    if (zone === 'saver') return 'minimal';
+    if (zone === 'clock') return 'clockscr';
   }
   return cycleMode(P.mode, P.opt, n);
 }
@@ -493,6 +501,7 @@ function draw() {
   const foot = `<div class="pl-foot">
       ${online ? '' : '<span class="pl-offline">인터넷 끊김 · 저장된 일정으로 울려요</span>'}
       ${mode === 'minimal' && P.mode !== 'minimal' ? '<span class="small" style="opacity:.8">화면 보호 중 · 수업 시간이 되면 원래 화면으로</span>' : ''}
+      ${mode === 'clockscr' ? '<span class="small" style="opacity:.8">시계 화면 · 일과 시간이 되면 원래 화면으로</span>' : ''}
       ${checks.map(([ok, t]) => `<span class="row" style="gap:6px">${ck(ok)}${h(t)}</span>`).join('')}
       <span class="grow"></span>
       <span class="small num" style="opacity:.7">v${h(APP_VERSION)}</span>
@@ -509,6 +518,21 @@ function draw() {
   const sname = id => isBuiltin(id) ? builtinName(id) : ((soundsById()[id] || {}).name || '');
   const nxDay = b => b.dateKey !== key ? ` · ${h(koreanDate(b.dateKey))}` : '';
 
+  if (mode === 'clockscr') {
+    const z = clock.z, hr = z.h + z.mi / 60;
+    const bg = CBGS.includes(P.opt.cbg) ? (P.opt.cbg === 'auto' ? autoClockBg(hr) : P.opt.cbg) : autoClockBg(hr);
+    const dim = P.opt.cdim !== false && (hr >= 21 || hr < 5);
+    const greet = hr < 5 ? '고요한 새벽이에요' : hr < 11 ? '좋은 아침이에요' : hr < 17 ? '좋은 오후예요' : hr < 21 ? '편안한 저녁이에요' : '편안한 밤 보내세요';
+    const ap = z.h < 12 ? '오전' : '오후', h12 = z.h % 12 || 12;
+    el.className = `pl clockscr cbg-${bg}${dim ? ' cs-dim' : ''}`;
+    el.innerHTML = `<div class="cs-bg"></div><div class="cs-shade"></div>
+      <div class="cs-top"><span class="cs-name">${h(P.space.name)}</span><span class="cs-greet">${greet}</span></div>
+      <div class="cs-main"><div class="cs-face">${clockSvg(z, P.opt.cdial || 'classic')}</div>
+        <div class="cs-date"><b>${big.md} ${big.dow}</b><span class="num">${ap} ${h12}:${String(z.mi).padStart(2, '0')}</span></div></div>
+      <div class="cs-next">${nx ? `다음 종 <b class="num">${h(nx.time)}</b> ${h(nx.label || '종')}${nxDay(nx)}` : ''}</div>
+      ${foot}`;
+    return applyShift();
+  }
   if (mode === 'analog') {
     el.className = `pl analog abg-${P.opt.abg || 'plain'}`;
     el.innerHTML = `${head}
@@ -762,6 +786,16 @@ function closeMenu() {
   P.pv = null; draw();
 }
 const SAMPLE_Z = { h: 10, mi: 9, s: 32, y: 2026, m: 10, d: 23, dow: 5 };
+// 설정 화면 24시간 막대용: 오늘 첫 종·마지막 종(분)과 지금(분)
+function dayInfoNow() {
+  try {
+    const n = now(), key = todayKey(n, tz()), z = fmtClock(n, tz()).z;
+    const L = bellsForDay(key, P.rules, P.timetables, tz(), ctx()).bells;
+    const mm = at => { const c = fmtClock(at, tz()).z; return c.h * 60 + c.mi; };
+    return L.length ? { first: mm(L[0].at), last: mm(L[L.length - 1].at), nowMin: z.h * 60 + z.mi, dayNote: `오늘 (첫 종 ${L[0].time} · 마지막 종 ${L[L.length - 1].time})` }
+      : { first: null, last: null, nowMin: z.h * 60 + z.mi, dayNote: '오늘 (종 없는 날)' };
+  } catch (e) { return {}; }
+}
 const SET_TABS = [['screen', '화면 모양'], ['group', '재생 그룹'], ['saver', '화면 보호·자동 바꾸기'], ['sound', '소리'], ['device', '이 기기']];
 function drawMenu() {
   const o = P.opt;
@@ -782,10 +816,10 @@ function drawMenu() {
     mainHtml = `<section class="set-card wide"><h4>재생 그룹 <span class="tiny muted">이 재생기가 어떤 요일별 일과표로 울릴지 골라요${realGroups().length ? '' : ' · 관리자 화면 › 재생 그룹에서 1학년·2학년 같은 그룹을 만들면 여기에 나와요'}</span></h4>
       ${groupPickerHtml()}</section>`;
   } else if (tab === 'saver') {
-    mainHtml = `<section class="set-card wide"><h4>화면 보호 (모니터가 타지 않게)</h4>
-      <div class="chips wrap"><button class="chip ${o.saver === 'night' ? 'on' : ''}" data-pl="saver" data-v="night">수업 없을 때 화면 보호</button>
-        <button class="chip ${o.saver === 'off' ? 'on' : ''}" data-pl="saver" data-v="off">항상 고른 화면</button></div>
-      <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면 J 화면 보호로 바뀌어요. 1분마다 화면이 몇 픽셀씩 움직이는 기능은 항상 켜져 있어요.</div></section>
+    const stAttr = (k, v) => `data-pl="st" data-k="${k}" data-v="${h(String(v))}"`;
+    mainHtml = `<section class="set-card wide"><h4>하루 화면 시간표</h4>
+      ${screenTimeHtml(o, stAttr, h, dayInfoNow())}</section>
+      ${(SAVERS.includes(o.saver) ? o.saver : 'clock') === 'clock' ? `<section class="set-card wide"><h4>시계 화면 꾸미기 <span class="tiny muted">(미리 보기에 시계 화면이 보여요)</span></h4>${clockScreenHtml(o, stAttr, h)}</section>` : ''}
       <section class="set-card wide"><h4>화면 모양 자동 바꾸기</h4>
       ${cycleHtml(o, P.mode, (k, v) => `data-pl="cy" data-k="${k}" data-v="${h(String(v))}"`, h)}</section>`;
   } else if (tab === 'sound') {
@@ -852,7 +886,7 @@ window.__bkPreviewState = () => {
   const pv = P.pv || {};
   return {
     space: P.space, saved: P.saved, timetables: P.timetables, rules: P.rules, groups: P.groups, group: P.group, sounds: P.sounds, offset: P.offset,
-    mode: pv.mode || (gate.dataset.kind === 'menu' && P.setTab === 'screen' && P.setTheme) || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, ...Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')) }
+    mode: pv.mode || (gate.dataset.kind === 'menu' && P.setTab === 'screen' && P.setTheme) || P.mode, opt: { ...P.opt, saver: 'off', cycle: 0, __clock: gate.dataset.kind === 'menu' && P.setTab === 'saver' && (SAVERS.includes(P.opt.saver) ? P.opt.saver : 'clock') === 'clock', ...Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')) }
   };
 };
 document.addEventListener('mouseover', e => {
@@ -995,6 +1029,13 @@ document.addEventListener('click', async e => {
   if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); pushSetting('saver', P.opt.saver); drawMenu(); mountPreview(); return; }
+  if (a === 'st') {
+    const patch = screenPatch(b.dataset.k, b.dataset.v);
+    if (!patch) return;
+    Object.assign(P.opt, patch); saveOpt();
+    for (const [k, v] of Object.entries(patch)) pushSetting(k, v);
+    drawMenu(); mountPreview(); return;
+  }
   if (a === 'cy') {
     const patch = cyclePatch(P.opt, b.dataset.k, b.dataset.v, P.mode);
     if (!patch) return;

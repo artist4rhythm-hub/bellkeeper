@@ -3,7 +3,7 @@ import * as F from './fb.js';
 import {
   APP_VERSION, SPACE_TYPES, DOW_LABELS, RULE_KINDS, todayKey, koreanDate, shortDate, addDays, dowOfKey,
   parseKey, dateKey, resolveDay, bellsForDay, upcomingBells, sortRules, schedCtx, BASE_GROUP, GROUP_COLORS, ruleTargets, fmtRemain, fmtRemainWords,
-  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName, BELL_COLORS, bellColor, autoColorId, DIALS, FONTS, loadFont, ABGS, INK_ARTS
+  escapeHtml as h, randomCode, cleanBells, timeToSec, pad, PLAYER_STYLES, styleName, BELL_COLORS, bellColor, autoColorId, DIALS, FONTS, loadFont, ABGS, INK_ARTS, fmtClock
 } from './core.js';
 import { TEMPLATES, TEMPLATE_GROUPS, starterFor, templateById, makeLessons } from './templates.js';
 import { KR_HOLIDAYS } from './holidays.js';
@@ -15,7 +15,7 @@ import {
 import { createRTA } from './rta.js';
 import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
 import * as G from './gyosa.js';
-import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay } from './themes.js';
+import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cycleHtml, cyclePatch, cycleWay, screenTimeHtml, clockScreenHtml, screenPatch } from './themes.js';
 import { ttsAvailable, GOOGLE_VOICES, DEFAULT_VOICE, voiceLabel, synthesize, ttsKey } from './tts.js';
 
 const root = document.getElementById('root');
@@ -2120,6 +2120,8 @@ function sheetDevice(sh) {
   const on = deviceOnline(d);
   const cur = d.display || d.mode;
   const saver = d.saver || 'night', cycle = d.cycle || 0, vol = d.vol || 100;
+  const stOpt = { saver: ['clock', 'night', 'off'].includes(d.saver) ? d.saver : 'clock', nightFrom: d.nightFrom ?? 24, nightTo: d.nightTo ?? 5, offDay: d.offDay || 'clock', cbg: d.cbg || 'auto', cdial: d.cdial || 'classic', cdim: d.cdim !== false };
+  const stAttr = (k, v) => `data-act="device-st" data-id="${h(d.id)}" data-k="${k}" data-v="${h(String(v))}"`;
   return sheetFrame(d.name || '재생기', `<div class="dv-grid">
     <div class="stack">
       <div class="card stack tight small">
@@ -2164,11 +2166,10 @@ function sheetDevice(sh) {
           : d.autofs === false ? '자동 전체 화면이 꺼져 있어요 — 전체 화면이 풀리면 화면을 한 번 눌러야 돌아가요. 그 노트북에서 "자동전체화면_켜기.reg"를 한 번 실행해 주세요'
           : '실수로 열린 비밀번호 칸은 10초 뒤 저절로 닫혀요. 전체 화면이 풀렸을 때 10초 뒤 저절로 돌아가려면 그 노트북에서 "자동전체화면_켜기.reg"를 한 번 실행해 주세요'}</div>` : ''}
       </section>
-      <section class="card stack">      <div class="bold">화면 보호 (모니터가 타지 않게)</div>
-        <div class="chips wrap"><button class="chip ${saver === 'night' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="night">수업 없을 때 화면 보호</button>
-          <button class="chip ${saver === 'off' ? 'on' : ''}" data-act="device-saver" data-id="${h(d.id)}" data-v="off">항상 고른 화면</button></div>
-        <div class="tiny muted">수업 없을 때 화면 보호: 첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면, 그리고 종이 없는 날은 검은 화면에 작은 시계가 떠다녀요.
-          모든 화면은 1분마다 몇 픽셀씩 움직여서 같은 자리에 오래 머물지 않아요.</div></section>
+      <section class="card stack"><div class="bold">하루 화면 시간표</div>
+        ${screenTimeHtml(stOpt, stAttr, h, devDayInfo(d))}
+        ${S.devices.length > 1 ? `<button class="btn" data-act="device-st-all" data-id="${h(d.id)}">이 시간표·시계 화면을 모든 재생기에 똑같이</button>` : ''}</section>
+      ${stOpt.saver === 'clock' ? `<section class="card stack"><div class="bold">시계 화면 꾸미기 <span class="tiny muted">· 고르면 오른쪽 미리 보기가 시계 화면으로 바뀌어요</span></div>${clockScreenHtml(stOpt, stAttr, h)}</section>` : ''}
       <section class="card stack"><div class="bold">화면 모양 자동 바꾸기</div>
         ${cycleHtml({ cycle, cycleSet: d.cycleSet || [], cycleOrd: d.cycleOrd || 'seq' }, d.display || d.mode || 'light', (k, v) => `data-act="device-cy" data-id="${h(d.id)}" data-k="${k}" data-v="${h(String(v))}"`, h)}</section>
       <details class="card small"><summary class="bold">노트북을 완전히 잠그려면 (키오스크 모드)</summary>
@@ -2792,7 +2793,7 @@ document.addEventListener('click', async e => {
         await sendCommand({ type: 'reload', target: id }); return toast('새로 고침 신호를 보냈어요');
       }
       case 'pv-size': S.pvSize = el.dataset.v; renderSheet(); return mountPv();
-      case 'dv-theme': sh.theme = el.dataset.v; sh.otab = themeOpts(el.dataset.v)[0]; S.pv = null; renderSheet(); return mountPv();
+      case 'dv-theme': S.pvClock = false; sh.theme = el.dataset.v; sh.otab = themeOpts(el.dataset.v)[0]; S.pv = null; renderSheet(); return mountPv();
       case 'dv-theme-back': sh.theme = null; S.pv = null; renderSheet(); return mountPv();
       case 'dv-otab': sh.otab = el.dataset.v; renderSheet(); return mountPv();
       case 'device-opt': {
@@ -2808,6 +2809,21 @@ document.addEventListener('click', async e => {
         await F.updateDoc(F.doc(sub('devices'), id), patch);
         Object.assign(d0, patch);
         renderSheet(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
+      }
+      case 'device-st': {
+        const patch = screenPatch(el.dataset.k, el.dataset.v);
+        if (!patch) return;
+        await F.updateDoc(F.doc(sub('devices'), id), patch);
+        const d = S.devices.find(x => x.id === id); if (d) Object.assign(d, patch);
+        S.pvClock = ['cbg', 'cdial', 'cdim'].includes(el.dataset.k) || (el.dataset.k === 'saver' && el.dataset.v === 'clock');
+        renderSheet(); mountPv(); return toast('바꿨어요 · 재생기에 몇 초 안에 반영돼요');
+      }
+      case 'device-st-all': {
+        const d0 = S.devices.find(x => x.id === id) || {};
+        const patch = { saver: d0.saver || 'clock', nightFrom: d0.nightFrom ?? 24, nightTo: d0.nightTo ?? 5, offDay: d0.offDay || 'clock', cbg: d0.cbg || 'auto', cdial: d0.cdial || 'classic', cdim: d0.cdim !== false };
+        const others = S.devices.filter(x => x.id !== id);
+        await Promise.all(others.map(x => F.updateDoc(F.doc(sub('devices'), x.id), patch).then(() => Object.assign(x, patch))));
+        renderSheet(); return toast(`재생기 ${others.length}대에 똑같이 적용했어요`);
       }
       case 'device-saver': case 'device-cycle': {
         const patch = act === 'device-saver' ? { saver: el.dataset.v } : { cycle: Number(el.dataset.v) };
@@ -3096,7 +3112,7 @@ window.__bkPreviewState = () => {
   return {
     space: S.space, saved: { name: d.name || '재생기' }, timetables: S.timetables, rules: S.rules, groups: [...S.groups], group: devGroup(d), sounds: S.sounds, offset: 0,
     mode: pv.mode || sh.theme || d.display || d.mode || 'light',
-    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', dcol: d.dcol || 'auto', dsec: d.dsec || 'auto', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0 })
+    opt: Object.assign({ font: d.font || 'noto', dial: d.dial || 'classic', abg: d.abg || 'plain', art: d.art || 'auto', digi: d.digi || 'led', dcol: d.dcol || 'auto', dsec: d.dsec || 'auto', hg: d.hg || 'gold', vol: d.vol || 100 }, Object.fromEntries(Object.entries(pv).filter(([k]) => k !== 'mode')), { saver: 'off', cycle: 0, cbg: d.cbg || 'auto', cdial: d.cdial || 'classic', cdim: d.cdim !== false, __clock: !!S.pvClock && !pv.mode && !sh.theme })
   };
 };
 document.addEventListener('mouseover', e => {
@@ -3109,3 +3125,15 @@ document.addEventListener('mouseout', e => {
   if (!b || (e.relatedTarget && b.contains(e.relatedTarget))) return;
   S.pv = null; pokePv();
 });
+
+// [기기] 하루 화면 시간표 막대용: 그 재생기 그룹의 오늘 첫 종·마지막 종
+function devDayInfo(d) {
+  try {
+    const tzv = tz(), n = Date.now(), key = todayKey(n, tzv);
+    const L = bellsForDay(key, S.rules, S.timetables, tzv, schedCtx(devGroup(d), S.groups)).bells;
+    const mm = at => { const c = fmtClock(at, tzv).z; return c.h * 60 + c.mi; };
+    const z = fmtClock(n, tzv).z;
+    return L.length ? { first: mm(L[0].at), last: mm(L[L.length - 1].at), nowMin: z.h * 60 + z.mi, dayNote: `오늘 이 재생기 (첫 종 ${L[0].time} · 마지막 종 ${L[L.length - 1].time})` }
+      : { first: null, last: null, nowMin: z.h * 60 + z.mi, dayNote: '오늘 이 재생기 (종 없는 날)' };
+  } catch (e) { return {}; }
+}

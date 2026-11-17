@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.17.0';
+export const APP_VERSION = '1.18.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -413,4 +413,48 @@ export function cycleMode(base, opt, n) {
   }
   const start = Math.max(0, list.indexOf(base));
   return list[(start + k) % list.length];
+}
+
+// ── 하루 화면 시간표: 일과 화면 · 시계 화면 · 화면 보호 (v1.18) ─────────
+// saver: 'clock' 시계 화면 + 밤에만 화면 보호 · 'night' 일과 밖은 모두 화면 보호(예전) · 'off' 항상 고른 화면
+export const SAVERS = ['clock', 'night', 'off'];
+export const NIGHT_FROM = [21, 22, 23, 24, 25];   // 24 = 밤 12시, 25 = 새벽 1시
+export const NIGHT_TO = [4, 5, 6, 7];
+export const CLOCK_BGS = [
+  { id: 'auto', name: '시간 따라 자동', desc: '아침·한낮·노을·별밤이 시간에 맞춰' },
+  { id: 'morning', name: '아침 교실', desc: '창가 햇살' },
+  { id: 'day', name: '한낮 교실', desc: '밝은 칠판 옆' },
+  { id: 'yard', name: '가을 안마당', desc: '느티나무 · 파란 하늘' },
+  { id: 'dusk', name: '노을 운동장', desc: '주황·보랏빛 저녁' },
+  { id: 'night', name: '별밤', desc: '초승달 · 조용한 언덕' },
+  { id: 'spring', name: '봄 들판', desc: '수채화 · 연둣빛' },
+  { id: 'snow', name: '눈 내린 학교', desc: '포근한 겨울' },
+  { id: 'plain', name: '그림 없이', desc: '차분한 단색' }
+];
+export const CBGS = CLOCK_BGS.map(b => b.id);
+// 'auto'일 때 시각(0~24, 소수)에 맞는 그림
+export function autoClockBg(hour) {
+  if (hour >= 5 && hour < 10) return 'morning';
+  if (hour >= 10 && hour < 13) return 'day';
+  if (hour >= 13 && hour < 17) return 'yard';
+  if (hour >= 17 && hour < 20) return 'dusk';
+  return 'night';
+}
+// 밤 화면 보호 시간인지 (from 21~25, to 4~7)
+export function inNight(hour, from, to) {
+  const f = NIGHT_FROM.includes(from) ? from : 24, t = NIGHT_TO.includes(to) ? to : 5;
+  return f >= 24 ? (hour >= f - 24 && hour < t) : (hour >= f || hour < t);
+}
+// 지금 무슨 화면인지: 'day'(일과) · 'clock'(시계 화면) · 'saver'(화면 보호)
+// bells: 오늘 울릴 종 [{at}], n: 지금(ms), hour: 그 학교 시각(소수)
+export function screenZone(opt, bells, n, hour) {
+  const saver = SAVERS.includes(opt.saver) ? opt.saver : 'clock';
+  if (saver === 'off') return 'day';
+  const L = bells || [];
+  const inSession = L.length && n >= L[0].at - 30 * 60000 && n <= L[L.length - 1].at + 15 * 60000;
+  if (inSession) return 'day';
+  if (saver === 'night') return 'saver';
+  if (inNight(hour, opt.nightFrom, opt.nightTo)) return 'saver';
+  if (!L.length && opt.offDay === 'saver') return 'saver';
+  return 'clock';
 }

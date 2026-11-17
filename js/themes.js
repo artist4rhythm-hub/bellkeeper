@@ -1,5 +1,5 @@
 // 벨키퍼 화면 모양(테마)별 옵션 — 재생기 설정과 관리자 [기기] 화면이 함께 써요
-import { PLAYER_STYLES, DIALS, ABGS, INK_ARTS, FONTS, loadFont, CYCLE_MINS, cycleMode, cycleList } from './core.js';
+import { PLAYER_STYLES, DIALS, ABGS, INK_ARTS, FONTS, loadFont, CYCLE_MINS, cycleMode, cycleList, SAVERS, NIGHT_FROM, NIGHT_TO, CLOCK_BGS, screenZone } from './core.js';
 import { clockSvg, inkArt, digiPickerHtml, HG_STYLES } from './faces.js';
 
 // 화면 모양마다 고를 수 있는 옵션 (글씨체는 모든 모양 공통이라 맨 뒤)
@@ -100,4 +100,57 @@ export function cycleHtml(o, base, attr, esc) {
   }
   html += `<div class="tiny muted">${way === 'fixed' ? '고른 화면 모양이 계속 그대로 있어요.' : '같은 학교의 재생기들은 같은 시각에 함께 바뀌어요. 수업 없을 때 화면 보호가 켜져 있으면 그 시간엔 화면 보호가 먼저예요.'}</div>`;
   return html;
+}
+
+// ── 하루 화면 시간표 (재생기 설정 · 관리자 [기기] 함께 씀) ─────────
+const HOUR_NAME = h => h === 24 ? '밤 12시' : h === 25 ? '새벽 1시' : h < 12 ? (h < 7 ? `새벽 ${h}시` : `아침 ${h}시`) : `밤 ${h - 12}시`;
+// 24시간 막대: first/last = 오늘 첫 종·마지막 종(분), 없으면 null
+export function dayBarHtml(o, first, last, nowMin) {
+  const base = new Date(2026, 0, 5).getTime();          // 날짜는 상관없음 — 분만 씀
+  const bells = first == null ? [] : [{ at: base + first * 60000 }, { at: base + last * 60000 }];
+  const segs = [];
+  for (let m = 0; m < 1440; m += 5) {
+    const z = screenZone(o, bells, base + m * 60000 + 1, m / 60);
+    if (segs.length && segs[segs.length - 1].z === z) segs[segs.length - 1].b = m + 5; else segs.push({ z, a: m, b: m + 5 });
+  }
+  const NAME = { day: '일과 화면', clock: '시계 화면', saver: '화면 보호' };
+  return `<div class="st-bar">${segs.map(x => `<span class="st-${x.z}" style="width:${((x.b - x.a) / 14.4).toFixed(3)}%" title="${NAME[x.z]} ${String(Math.floor(x.a / 60)).padStart(2, '0')}:${String(x.a % 60).padStart(2, '0')}~">${x.b - x.a >= 150 ? NAME[x.z] : ''}</span>`).join('')}${nowMin != null ? `<i class="st-now" style="left:${(nowMin / 14.4).toFixed(2)}%"></i>` : ''}</div>
+    <div class="st-ticks">${[0, 6, 12, 18, 24].map(hh => `<span style="left:${hh / 24 * 100}%">${String(hh).padStart(2, '0')}</span>`).join('')}</div>
+    <div class="st-legend"><span><i class="st-saver"></i>화면 보호</span><span><i class="st-clock"></i>시계 화면</span><span><i class="st-day"></i>일과 화면</span></div>`;
+}
+// attr(k, v) → 버튼의 data 속성 · info = { first, last, nowMin, dayNote }
+export function screenTimeHtml(o, attr, esc, info = {}) {
+  const saver = SAVERS.includes(o.saver) ? o.saver : 'clock';
+  const nf = NIGHT_FROM.includes(o.nightFrom) ? o.nightFrom : 24, nt = NIGHT_TO.includes(o.nightTo) ? o.nightTo : 5;
+  const ways = [['clock', '시계 화면 + 밤에만 화면 보호', '일과가 끝나면 시계 화면, 늦은 밤에만 검은 화면'], ['night', '일과 밖은 모두 화면 보호', '예전 방식'], ['off', '항상 고른 화면', '화면 보호 없이']];
+  let html = `<div class="cy-ways st-ways">${ways.map(([v, t, d]) => `<button class="cy-way ${saver === v ? 'on' : ''}" ${attr('saver', v)}><b>${t}</b><span>${d}</span></button>`).join('')}</div>`;
+  html += `<div class="st-preview"><div class="cy-lab">${esc(info.dayNote || '오늘 하루')}</div>${dayBarHtml({ ...o, saver, nightFrom: nf, nightTo: nt }, info.first ?? null, info.last ?? null, info.nowMin ?? null)}</div>`;
+  if (saver === 'clock') {
+    html += `<div class="cy-row"><span class="cy-lab">화면 보호 시작</span><div class="chips wrap">${NIGHT_FROM.map(x => `<button class="chip ${nf === x ? 'on' : ''}" ${attr('nightFrom', x)}>${HOUR_NAME(x)}</button>`).join('')}</div></div>
+      <div class="cy-row"><span class="cy-lab">화면 보호 끝</span><div class="chips wrap">${NIGHT_TO.map(x => `<button class="chip ${nt === x ? 'on' : ''}" ${attr('nightTo', x)}>${HOUR_NAME(x)}</button>`).join('')}</div></div>
+      <div class="cy-row"><span class="cy-lab">종 없는 날</span><div class="chips wrap"><button class="chip ${o.offDay !== 'saver' ? 'on' : ''}" ${attr('offDay', 'clock')}>시계 화면 (밤엔 화면 보호)</button><button class="chip ${o.offDay === 'saver' ? 'on' : ''}" ${attr('offDay', 'saver')}>하루 종일 화면 보호</button></div></div>
+      <div class="tiny muted">일과 화면 = 첫 종 30분 전 ~ 마지막 종 15분 뒤 (고른 화면·자동 바꾸기 그대로). 주말·방학처럼 종이 없는 날도 같은 시각에 화면 보호가 켜져요.</div>`;
+  } else if (saver === 'night') html += '<div class="tiny muted">첫 종 30분 전 ~ 마지막 종 15분 뒤가 아니면, 그리고 종이 없는 날은 검은 화면에 작은 시계가 떠다녀요.</div>';
+  return html;
+}
+// 시계 화면 꾸미기: 배경 그림 · 시계판 · 밤 은은하게
+export function clockScreenHtml(o, attr, esc, imgBase = 'img/bg/') {
+  const cbg = CLOCK_BGS.some(b => b.id === o.cbg) ? o.cbg : 'auto', cd = DIALS.some(d => d.id === o.cdial) ? o.cdial : 'classic';
+  return `<div class="cy-row top"><span class="cy-lab">배경 그림</span>
+      <div class="cs-pick">${CLOCK_BGS.map(b => `<button class="cs-bgbtn ${cbg === b.id ? 'on' : ''}" ${attr('cbg', b.id)}>
+        <span class="cs-thumb ${b.id === 'auto' ? 'auto' : ''} ${b.id === 'plain' ? 'plain' : ''}">${b.id === 'auto' ? ['morning', 'yard', 'dusk', 'night'].map(x => `<i style="background-image:url(${imgBase}${x}-s.webp)"></i>`).join('') : b.id === 'plain' ? '' : `<i style="background-image:url(${imgBase}${b.id}-s.webp)"></i>`}</span>
+        <b>${esc(b.name)}</b><span class="tiny muted">${esc(b.desc)}</span></button>`).join('')}</div></div>
+    <div class="cy-row top"><span class="cy-lab">시계판</span>
+      <div class="dial-grid cs-dials">${DIALS.map(d => `<button class="${cd === d.id ? 'on' : ''}" ${attr('cdial', d.id)}><span class="dial-mini">${clockSvg(SAMPLE_Z, d.id)}</span><b>${esc(d.name)}</b></button>`).join('')}</div></div>
+    <div class="cy-row"><span class="cy-lab">밤 9시 이후</span><div class="chips wrap"><button class="chip ${o.cdim !== false ? 'on' : ''}" ${attr('cdim', 'on')}>은은하게 (밝기 낮춤)</button><button class="chip ${o.cdim === false ? 'on' : ''}" ${attr('cdim', 'off')}>그대로</button></div></div>`;
+}
+// 고른 버튼 → 기기 문서에 쓸 값
+export function screenPatch(k, v) {
+  if (k === 'saver') return SAVERS.includes(v) ? { saver: v } : null;
+  if (k === 'nightFrom' || k === 'nightTo') return { [k]: Number(v) };
+  if (k === 'offDay') return { offDay: v === 'saver' ? 'saver' : 'clock' };
+  if (k === 'cbg') return CLOCK_BGS.some(b => b.id === v) ? { cbg: v } : null;
+  if (k === 'cdial') return DIALS.some(d => d.id === v) ? { cdial: v } : null;
+  if (k === 'cdim') return { cdim: v !== 'off' };
+  return null;
 }
