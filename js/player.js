@@ -6,7 +6,7 @@ import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cyc
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
-  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
+  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, syncStore, storeStatus, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
 } from './sounds.js';
 
@@ -260,7 +260,7 @@ function startRunning() {
     if (d.exists()) { const nx = { id: d.id, ...d.data() }; if (JSON.stringify(nx) !== JSON.stringify(P.space)) { P.space = nx; recompute(); return; } }
     if (was !== P.fromCache) draw();
   }, onErr));
-  P.unsub.push(F.onSnapshot(sub('timetables'), q => { P.timetables = q.docs.map(d => ({ id: d.id, ...d.data(), bells: cleanBells(d.data().bells) })); recompute(); }, onErr));
+  P.unsub.push(F.onSnapshot(sub('timetables'), q => { P.timetables = q.docs.map(d => ({ id: d.id, ...d.data(), bells: cleanBells(d.data().bells) })); P.ttLoaded = true; recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(sub('rules'), q => { P.rules = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute(); }, onErr));
   P.unsub.push(F.onSnapshot(sub('groups'), q => {
     P.groups = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
@@ -268,7 +268,7 @@ function startRunning() {
     if (gate.dataset.kind === 'menu' && !document.activeElement.closest('.set-page select')) drawMenu();
   }, e => console.warn(e)));
   P.unsub.push(F.onSnapshot(sub('sounds'), q => {
-    P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); recompute();
+    P.sounds = q.docs.map(d => ({ id: d.id, ...d.data() })); P.sndLoaded = true; recompute();
     if (!P.corsProbed) { const f = P.sounds.find(s => s.url); if (f) { P.corsProbed = true; probeCors(f.url); } }
   }, onErr));
   P.unsub.push(F.onSnapshot(F.query(sub('commands'), F.orderBy('createdAt', 'desc'), F.limit(10)), q => {
@@ -363,6 +363,9 @@ function recompute() {
     }
   }
   forgetUnused(keep);
+  // v1.21: 일정 전체(모든 시간표·모든 요일)에 나오는 소리를 이 컴퓨터에 저장 — 인터넷이 끊겨도 울리게
+  // 시간표와 소리 목록을 둘 다 받은 뒤에만 (시작할 때 잠깐 비어 있는 순간에 저장본을 지우지 않게)
+  if (P.ttLoaded && P.sndLoaded) { P.keepAll = allScheduleUrls(); syncStore(P.keepAll); }
   preloadBuiltins([...new Set(P.upcoming.filter(b => b.at - n < 2 * 86400000).slice(0, 60).flatMap(b => [b.soundId, b.bgmId]).filter(Boolean))]);
   draw();
 }
@@ -461,6 +464,24 @@ function hideRinging() {
   }
 }
 
+// 일정 전체에 나오는 소리 주소 (올린 파일 + 기본 종소리)
+function allScheduleUrls() {
+  const byId = soundsById(), out = new Set();
+  for (const t of P.timetables || []) for (const b of t.bells || []) {
+    for (const id of [b.soundId || 'b:westminster', b.sayId, b.bgmId]) {
+      if (!id || id === 'none') continue;
+      if (isBuiltin(id)) out.add(builtinUrl(id));
+      else if (byId[id] && byId[id].url) out.add(byId[id].url);
+    }
+  }
+  return out;
+}
+function offlineLine() {
+  const st = storeStatus(P.keepAll || new Set());
+  if (!st.total) return '';
+  if (st.ok === st.total) return `일정의 소리 ${st.total}개 모두 저장됨 ✓ — 인터넷이 끊겨도 울려요`;
+  return `일정의 소리 저장 중 ${st.ok}/${st.total}${st.bad ? ` · ${st.bad}개는 아직 못 받음 (인터넷이 돌아오면 다시 받아요)` : ''}`;
+}
 // 오늘 남은 종의 소리가 얼마나 준비됐는지
 function soundPrep() {
   const n = now(), byId = soundsById(), end = n + 86400000;
@@ -551,7 +572,7 @@ function draw() {
     [true, '7일 일정 저장됨'],
     [!!P.wake || !('wakeLock' in navigator), P.wake ? '화면 켜짐 유지' : (('wakeLock' in navigator) ? '화면 켜짐 유지 안 됨' : '화면 꺼짐을 "안 함"으로')],
     [audioReady(), audioReady() ? '소리 준비됨' : '소리 대기'],
-    ...(() => { const st = soundPrep(); return st.total ? [[st.ready === st.total, st.ready === st.total ? `오늘 소리 ${st.total}개 미리 받음` : `소리 받는 중 ${st.ready}/${st.total}`]] : []; })()
+    ...(() => { const st = storeStatus(P.keepAll || new Set()); return st.total ? [[st.ok === st.total, st.ok === st.total ? `소리 ${st.total}개 저장됨` : `소리 저장 중 ${st.ok}/${st.total}`]] : []; })()
   ];
   const ck = ok => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${ok ? (DARK_MODES.includes(mode) ? '#4CC28A' : '#2F6B4F') : '#A23B2A'}" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">${ok ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 7v6M12 17v.5"/>'}</svg>`;
   const foot = `<div class="pl-foot">
@@ -889,8 +910,9 @@ function drawMenu() {
   } else {
     mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
       <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
-      ${(() => { const st = soundPrep(); return `<div class="set-sub"><b>소리 미리 받아 두기</b> <span class="tiny muted">오늘 남은 종 소리 ${st.total}개 중 ${st.ready}개 준비됨${st.total && st.ready === st.total ? ' ✓' : ' · 차례로 받는 중'}</span></div>`; })()}
-      <div class="tiny muted">앞으로 이틀 동안 울릴 소리(올린 파일·안내 방송·배경음악 포함)를 이 컴퓨터에 저장하고 미리 풀어 둬요. 울리는 순간에는 인터넷을 쓰지 않아요.</div>
+      ${(() => { const st = soundPrep(); return `<div class="set-sub"><b>인터넷 없이도 울리기</b></div>
+        <div class="tiny">${h(offlineLine() || '일정에 소리가 아직 없어요')}</div>
+        <div class="tiny muted">오늘 남은 종 소리 ${st.total}개 중 ${st.ready}개는 바로 울릴 수 있게 풀어 둠. 일정(시간표)에 나오는 모든 소리를 이 컴퓨터에 저장하고, 일정이 바뀌면 바뀐 소리만 새로 받아요. 새로 고침하거나 컴퓨터를 다시 켜도 저장본으로 울려요.</div>`; })()}
       <div class="set-sub"><b>성능</b> <span class="tiny muted">소리가 깨지거나 화면이 버벅이면 [가볍게]</span></div>
       <div class="chips wrap">${[['auto', '자동 (추천)'], ['lite', '가볍게'], ['full', '화려하게']].map(([v, t]) => `<button class="chip ${perfMode() === v ? 'on' : ''}" data-pl="perf" data-v="${v}">${t}</button>`).join('')}</div>
       <div class="tiny muted">지금: ${h(perfWhy())}. 가볍게 = 그림자·흐림·깜빡임 효과 끄기 (소리는 그대로예요)</div>

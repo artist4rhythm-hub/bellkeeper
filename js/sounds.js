@@ -426,14 +426,52 @@ function playBuffer(buffer, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, 
 const AUDIO_CACHE = 'bk-audio-v1';
 const BIG_FILE = 6 * 1024 * 1024;   // 6MB 넘는 긴 파일(배경음악 등)은 풀어 두지 않고 저장된 파일로 바로 재생 (메모리 아끼기)
 async function getBytes(url) {
-  // 우리 사이트의 기본 종소리는 서비스 워커가 따로 저장해 둬요 (두 번 저장하지 않게)
-  if (isBuiltinUrl(url)) { const r = await fetch(url); if (!r.ok) throw new Error('sound ' + r.status); return await r.arrayBuffer(); }
   let cache = null;
   try { cache = await caches.open(AUDIO_CACHE); const hit = await cache.match(url); if (hit) return await hit.arrayBuffer(); } catch (e) { cache = null; }
   const r = await fetch(url, { mode: 'cors' });
   if (!r.ok) throw new Error('sound ' + r.status);
-  if (cache) { try { await cache.put(url, r.clone()); } catch (e) { /* 저장 공간이 부족하면 그냥 넘어감 */ } }
+  if (cache) { try { await cache.put(url, r.clone()); stored.add(url); } catch (e) { /* 저장 공간이 부족하면 그냥 넘어감 */ } }
   return await r.arrayBuffer();
+}
+
+// ── 일정 전체의 소리를 이 컴퓨터에 저장 (v1.21) ──────────────────────
+// 일정을 한 번 받으면 거기 나오는 모든 소리를 저장해 두고, 일정이 바뀌면 바뀐 것만 새로 받아요.
+// 인터넷이 끊기거나 컴퓨터를 다시 켜도 저장된 소리로 울려요. (메모리에 푸는 건 가까운 이틀 치만)
+const stored = new Set();     // 저장소에 있는 주소
+const failed = new Map();     // 못 받은 주소 → 마지막 시도 시각
+let storeReady = (async () => { try { const c = await caches.open(AUDIO_CACHE); (await c.keys()).forEach(k => stored.add(k.url)); } catch (e) { /* 무시 */ } })();
+let storeChain = Promise.resolve(), storeSig = '';
+async function storeOne(url) {
+  if (stored.has(url)) return;
+  try {
+    const c = await caches.open(AUDIO_CACHE);
+    if (await c.match(url)) { stored.add(url); return; }
+    const r = await fetch(url, { mode: 'cors' });
+    if (!r.ok) throw new Error('sound ' + r.status);
+    await c.put(url, r);
+    stored.add(url); failed.delete(url);
+  } catch (e) { failed.set(url, Date.now()); }
+}
+// keepAll: 일정 전체에 나오는 소리 주소들 — 없는 건 받고, 일정에서 빠진 건 지워요
+export async function syncStore(keepAll) {
+  await storeReady;
+  if (!keepAll || !keepAll.size) return;   // 일정이 비어 보이면 아무것도 지우지 않음 (안전장치)
+  const list = [...keepAll].filter(Boolean).sort();
+  const sig = list.join('|');
+  const retry = [...failed.values()].some(t => Date.now() - t > 60000);   // 못 받은 게 있으면 1분마다 다시
+  if (sig === storeSig && !retry) return;
+  storeSig = sig;
+  for (const url of list) if (!stored.has(url)) storeChain = storeChain.then(() => storeOne(url)).then(() => new Promise(r => setTimeout(r, 80)));
+  // 일정에서 빠진 소리는 저장소에서 지우기
+  try {
+    const c = await caches.open(AUDIO_CACHE);
+    for (const k of await c.keys()) if (!keepAll.has(k.url)) { await c.delete(k); stored.delete(k.url); }
+  } catch (e) { /* 무시 */ }
+}
+export function storeStatus(keepAll) {
+  let ok = 0, bad = 0, total = 0;
+  for (const u of keepAll) { if (!u) continue; total++; if (stored.has(u)) ok++; else if (failed.has(u)) bad++; }
+  return { ok, bad, total };
 }
 const prep = new Map();      // url → Promise<{ buf } | { blobUrl }>
 const prepDone = new Map();  // url → 준비된 값
@@ -509,12 +547,10 @@ export function preloadUrl(url) {
 }
 export function forgetUnused(keepUrls) {
   for (const [url, a] of pool) if (!keepUrls.has(url)) { try { a.pause(); a.src = ''; } catch (e) { /* 무시 */ } pool.delete(url); }
-  for (const url of [...prep.keys()]) if (!keepUrls.has(url) && !isBuiltinUrl(url)) {
+  for (const url of [...prep.keys()]) if (!keepUrls.has(url) && !isBuiltinUrl(url)) {   // 메모리에서만 내려놓음 (저장본은 그대로)
     const v = prepDone.get(url); if (v && v.blobUrl) { try { URL.revokeObjectURL(v.blobUrl); } catch (e) { /* 무시 */ } }
     prep.delete(url); prepDone.delete(url);
   }
-  // 저장해 둔 올린 파일 중 앞으로 이틀 동안 안 쓰는 것은 지워서 공간 아끼기 (기본 종소리는 그대로 둠)
-  caches.open(AUDIO_CACHE).then(c => c.keys().then(ks => ks.forEach(k => { if (!keepUrls.has(k.url) && !isBuiltinUrl(k.url)) c.delete(k); }))).catch(() => {});
 }
 function isBuiltinUrl(url) { try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; } }
 
