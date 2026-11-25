@@ -371,7 +371,7 @@ function recompute() {
       else if (isBuiltin(id) && isStream(id)) keep.add(builtinUrl(id));
     }
   }
-  forgetUnused(keep);
+  if (!P.ringing) forgetUnused(keep);   // 울리는 중에는 정리하지 않음
   // v1.21: 일정 전체(모든 시간표·모든 요일)에 나오는 소리를 이 컴퓨터에 저장 — 인터넷이 끊겨도 울리게
   // 시간표와 소리 목록을 둘 다 받은 뒤에만 (시작할 때 잠깐 비어 있는 순간에 저장본을 지우지 않게)
   if (P.ttLoaded && P.sndLoaded) { P.keepAll = allScheduleUrls(); syncStore(P.keepAll); }

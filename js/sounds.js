@@ -556,12 +556,16 @@ export function preloadUrl(url) {
   return a;
 }
 export function forgetUnused(keepUrls) {
-  for (const [url, a] of pool) if (!keepUrls.has(url)) { try { a.pause(); a.src = ''; } catch (e) { /* 무시 */ } pool.delete(url); }
+  // v1.23: 지금 재생 중인 소리는 절대 건드리지 않음 (예전엔 긴 노래가 중간에 멈췄다가 처음부터 다시 나오던 원인)
+  for (const [url, a] of pool) if (!keepUrls.has(url) && a.paused && !playing.has(a)) { try { a.src = ''; } catch (e) { /* 무시 */ } pool.delete(url); }
   for (const url of [...prep.keys()]) if (!keepUrls.has(url) && !isBuiltinUrl(url)) {   // 메모리에서만 내려놓음 (저장본은 그대로)
-    const v = prepDone.get(url); if (v && v.blobUrl) { try { URL.revokeObjectURL(v.blobUrl); } catch (e) { /* 무시 */ } }
+    const v = prepDone.get(url);
+    if (v && v.blobUrl) { if (inUse.has(v.blobUrl)) continue; try { URL.revokeObjectURL(v.blobUrl); } catch (e) { /* 무시 */ } }
     prep.delete(url); prepDone.delete(url);
   }
 }
+const playing = new Set();   // 재생 중인 <audio>
+const inUse = new Set();     // 재생 중인 저장본 주소
 function isBuiltinUrl(url) { try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; } }
 
 function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}) {
@@ -588,19 +592,22 @@ function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts =
 function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}, origUrl = '') {
   const a = preloadUrl(url);
   if (ctx && routed.has(a) && ctx.state !== 'running') { try { ctx.resume(); } catch (e) { /* 무시 */ } }
-  routeToAnalyser(a, url);
+  // 긴 소리는 브라우저의 소리 처리 장치를 거치지 않고 스피커로 바로 (거칠 게 적을수록 덜 끊겨요) · 관리자 화면의 소리 막대가 필요할 때만 연결
+  if (wantAnalyser) routeToAnalyser(a, url);
+  playing.add(a); if (url.startsWith('blob:')) inUse.add(url);
   const base = Math.max(0, Math.min(1, volume / 100));
   if (clipDur > 0 && !maxSec) maxSec = clipDur + 0.3;
   let fadeTimer = null, stopTimer = null, stepTimer = null;
   let resolveEnd;
   const finished = new Promise(r => { resolveEnd = r; });
-  const end = () => { clearTimeout(fadeTimer); clearTimeout(stopTimer); clearInterval(stepTimer); resolveEnd(); };
+  const end = () => { clearTimeout(fadeTimer); clearTimeout(stopTimer); clearInterval(stepTimer); playing.delete(a); inUse.delete(url); resolveEnd(); };
   a.onended = end;
   a.onerror = () => {
     // CORS 설정이 사라진 경우: 분석기 연결 없이 다시 재생
-    if (a.crossOrigin && !opts._retry) {
+    // 처음부터 다시 틀지 않음 — 시작도 못 한 경우(0.5초 안)에만 한 번 다시 시도
+    if (a.crossOrigin && !opts._retry && (a.currentTime || 0) < 0.5) {
       try { localStorage.setItem('bk.cors.' + new URL(url).origin, '0'); } catch (e) { /* 무시 */ }
-      pool.delete(url);
+      pool.delete(url); playing.delete(a);
       const r = playElement(url, volume, maxSec, startAt, clipDur, { ...opts, _retry: true });
       r.finished.then(end);
       return;
