@@ -1,5 +1,5 @@
 // 벨키퍼 서비스 워커 — 인터넷이 끊겨도 화면과 기본 종소리가 뜨도록 앱 파일을 저장해 둡니다.
-const CACHE = 'bellkeeper-v1.19.0';
+const CACHE = 'bellkeeper-v1.20.0';
 const SOUNDS = 'bellkeeper-sounds-v1';   // 기본 종소리는 바뀌지 않으니 따로 오래 보관
 const SHELL = [
   './', './index.html', './app.html', './play.html', './css/style.css',
@@ -13,8 +13,9 @@ const SHELL = [
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
+// bk-audio-*: 재생기가 미리 받아 둔 올린 소리 — 업데이트해도 지우지 않아요
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== SOUNDS).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== SOUNDS && !k.startsWith('bk-audio-')).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', e => {

@@ -339,6 +339,8 @@ export function audioCtx() {
 
 // ── 기본 종소리 (미리 풀어 둔 소리 데이터로 정확하게 재생) ──────────
 const bufCache = new Map();
+const bufOk = new Set();
+export function builtinReady(id) { const info = builtinInfo(id) || {}; return info.stream ? prepDone.has(builtinUrl(id)) : bufOk.has(builtinUrl(resolveBuiltin(id))); }
 function decode(ab) {
   return new Promise((res, rej) => {
     try {
@@ -350,8 +352,8 @@ function decode(ab) {
 export function loadBuiltin(id) {
   const key = builtinUrl(resolveBuiltin(id));   // 묶음 파일은 한 번만 풀어서 같이 씀
   if (!bufCache.has(key)) {
-    const p = fetch(key).then(r => { if (!r.ok) throw new Error('sound ' + r.status); return r.arrayBuffer(); }).then(decode);
-    p.catch(() => bufCache.delete(key));
+    const p = getBytes(key).then(decode);
+    p.then(() => bufOk.add(key), () => bufCache.delete(key));
     bufCache.set(key, p);
   }
   return bufCache.get(key);
@@ -359,7 +361,7 @@ export function loadBuiltin(id) {
 export function preloadBuiltins(ids) {
   for (const id of ids) {
     if (!isBuiltin(id)) continue;
-    if (isStream(id)) preloadUrl(builtinUrl(id));
+    if (isStream(id)) prepareUrl(builtinUrl(id));
     else loadBuiltin(id).catch(() => {});
   }
 }
@@ -379,34 +381,91 @@ async function playBuiltin(id, volume = 100, maxSec = 0) {
     // 소리 데이터를 못 풀면 파일을 그대로 재생
     return playUrl(builtinUrl(id), volume, maxSec, info.sprite ? info.start : 0, info.sprite ? info.dur : 0);
   }
+  return playBuffer(buffer, volume, maxSec, info.sprite ? info.start : 0, info.sprite ? info.dur : 0);
+}
+
+// ── 미리 풀어 둔 소리를 정확하게 재생 (v1.20: 모든 소리 공통) ───────────
+// 소리 크기 변화(서서히 커지기·작아지기)도 오디오 장치가 직접 처리해서, 컴퓨터가 바빠도 끊기지 않아요
+function playBuffer(buffer, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}) {
+  const c = audioCtx();
   const src = c.createBufferSource();
   src.buffer = buffer;
+  src.loop = !!opts.loop;
   const g = c.createGain();
   const v = Math.max(0, Math.min(1, volume / 100));
-  g.gain.value = v;
   src.connect(g); g.connect(master);
-  const t0 = c.currentTime + 0.02;
-  let dur = buffer.duration;
-  if (info.sprite) { src.start(t0, info.start, info.dur + 0.05); dur = info.dur; }
-  else src.start(t0);
-  if (maxSec > 0 && maxSec < dur) {
+  const t0 = c.currentTime + 0.03;
+  if (opts.fadeIn) { g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(v, t0 + opts.fadeIn); }
+  else g.gain.setValueAtTime(v, t0);
+  let dur = clipDur > 0 ? clipDur : Math.max(0, buffer.duration - (startAt || 0));
+  if (clipDur > 0) src.start(t0, startAt, clipDur + 0.05);
+  else src.start(t0, startAt || 0);
+  if (maxSec > 0 && (opts.loop || maxSec < dur)) {
     const fade = Math.min(2, maxSec / 3);
     g.gain.setValueAtTime(v, t0 + maxSec - fade);
     g.gain.linearRampToValueAtTime(0.0001, t0 + maxSec);
     src.stop(t0 + maxSec + 0.05);
     dur = maxSec;
   }
-  let resolveEnd;
-  const finished = new Promise(r => { resolveEnd = r; });
+  let resolveEnd, done = false;
+  const finished = new Promise(r => { resolveEnd = () => { if (!done) { done = true; r(); } }; });
   src.onended = () => resolveEnd();
-  setTimeout(resolveEnd, (dur + 0.5) * 1000);
+  if (!opts.loop || maxSec > 0) setTimeout(resolveEnd, (dur + 0.6) * 1000);
   return {
     finished,
     stop() {
-      try { g.gain.cancelScheduledValues(c.currentTime); g.gain.setTargetAtTime(0.0001, c.currentTime, 0.08); src.stop(c.currentTime + 0.4); } catch (e) { /* 무시 */ }
-      setTimeout(resolveEnd, 450);
+      try { const n = c.currentTime; g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value, n); g.gain.linearRampToValueAtTime(0.0001, n + 1.6); src.stop(n + 1.7); } catch (e) { /* 무시 */ }
+      setTimeout(resolveEnd, 1750);
     }
   };
+}
+
+// ── 오늘·내일 울릴 소리를 미리 받아 두기 (v1.20) ────────────────────
+// 1) 파일을 이 컴퓨터에 저장(캐시) → 새로 고침·업데이트 뒤에도 인터넷 없이 바로
+// 2) 울리기 전에 미리 풀어서(디코딩) 메모리에 → 울리는 순간에는 재생만
+const AUDIO_CACHE = 'bk-audio-v1';
+const BIG_FILE = 6 * 1024 * 1024;   // 6MB 넘는 긴 파일(배경음악 등)은 풀어 두지 않고 저장된 파일로 바로 재생 (메모리 아끼기)
+async function getBytes(url) {
+  // 우리 사이트의 기본 종소리는 서비스 워커가 따로 저장해 둬요 (두 번 저장하지 않게)
+  if (isBuiltinUrl(url)) { const r = await fetch(url); if (!r.ok) throw new Error('sound ' + r.status); return await r.arrayBuffer(); }
+  let cache = null;
+  try { cache = await caches.open(AUDIO_CACHE); const hit = await cache.match(url); if (hit) return await hit.arrayBuffer(); } catch (e) { cache = null; }
+  const r = await fetch(url, { mode: 'cors' });
+  if (!r.ok) throw new Error('sound ' + r.status);
+  if (cache) { try { await cache.put(url, r.clone()); } catch (e) { /* 저장 공간이 부족하면 그냥 넘어감 */ } }
+  return await r.arrayBuffer();
+}
+const prep = new Map();      // url → Promise<{ buf } | { blobUrl }>
+const prepDone = new Map();  // url → 준비된 값
+let prepChain = Promise.resolve();
+export function prepareUrl(url) {
+  if (!url) return null;
+  if (!prep.has(url)) {
+    // 한 번에 하나씩 차례로 준비 (느린 컴퓨터에 부담 안 주게)
+    const p = prepChain.then(async () => {
+      const ab = await getBytes(url);
+      if (ab.byteLength > BIG_FILE) return { blobUrl: URL.createObjectURL(new Blob([ab])) };
+      return { buf: await decode(ab) };
+    });
+    prepChain = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 60)));
+    p.then(v => prepDone.set(url, v), () => { prep.delete(url); });
+    prep.set(url, p);
+  }
+  return prep.get(url);
+}
+export function prepareStatus(urls) {
+  let ready = 0, total = 0;
+  for (const u of urls) { if (!u) continue; total++; if (prepDone.has(u)) ready++; }
+  return { ready, total };
+}
+// 오디오 장치 깨우기: 종 몇 초 전에 소리 없는 소리를 흘려서, 첫 소리가 '툭' 끊기지 않게
+export async function warmUp() {
+  try {
+    const c = audioCtx();
+    if (c.state !== 'running') await c.resume();
+    const b = c.createBuffer(1, Math.round(c.sampleRate * 0.5), c.sampleRate);
+    const s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start();
+  } catch (e) { /* 무시 */ }
 }
 
 // ── 오디오 파일 ─────────────────────────────────────
@@ -450,9 +509,30 @@ export function preloadUrl(url) {
 }
 export function forgetUnused(keepUrls) {
   for (const [url, a] of pool) if (!keepUrls.has(url)) { try { a.pause(); a.src = ''; } catch (e) { /* 무시 */ } pool.delete(url); }
+  for (const url of [...prep.keys()]) if (!keepUrls.has(url) && !isBuiltinUrl(url)) {
+    const v = prepDone.get(url); if (v && v.blobUrl) { try { URL.revokeObjectURL(v.blobUrl); } catch (e) { /* 무시 */ } }
+    prep.delete(url); prepDone.delete(url);
+  }
+  // 저장해 둔 올린 파일 중 앞으로 이틀 동안 안 쓰는 것은 지워서 공간 아끼기 (기본 종소리는 그대로 둠)
+  caches.open(AUDIO_CACHE).then(c => c.keys().then(ks => ks.forEach(k => { if (!keepUrls.has(k.url) && !isBuiltinUrl(k.url)) c.delete(k); }))).catch(() => {});
 }
+function isBuiltinUrl(url) { try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; } }
 
 function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}) {
+  // 미리 준비된 소리가 있으면 그것으로 (끊김 없음) · 아직이면 잠깐(최대 2.5초) 기다렸다가 · 그래도 안 되면 예전 방식
+  const ready = prepDone.get(url);
+  if (ready && ready.buf) return playBuffer(ready.buf, volume, maxSec, startAt, clipDur, opts);
+  if (ready && ready.blobUrl) return playElement(ready.blobUrl, volume, maxSec, startAt, clipDur, opts, url);
+  let inner = null, stopped = false, resolveEnd;
+  const finished = new Promise(r => { resolveEnd = r; });
+  const p = prepareUrl(url) || Promise.reject(new Error('no url'));
+  Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 2500))])
+    .then(v => v.buf ? playBuffer(v.buf, volume, maxSec, startAt, clipDur, opts) : playElement(v.blobUrl, volume, maxSec, startAt, clipDur, opts, url),
+          () => playElement(url, volume, maxSec, startAt, clipDur, opts))
+    .then(c => { inner = c; if (stopped) c.stop(); c.finished.then(resolveEnd); });
+  return { finished, stop() { stopped = true; if (inner) inner.stop(); else setTimeout(resolveEnd, 50); } };
+}
+function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}, origUrl = '') {
   const a = preloadUrl(url);
   if (ctx && routed.has(a) && ctx.state !== 'running') { try { ctx.resume(); } catch (e) { /* 무시 */ } }
   routeToAnalyser(a, url);
@@ -468,7 +548,7 @@ function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts =
     if (a.crossOrigin && !opts._retry) {
       try { localStorage.setItem('bk.cors.' + new URL(url).origin, '0'); } catch (e) { /* 무시 */ }
       pool.delete(url);
-      const r = playUrl(url, volume, maxSec, startAt, clipDur, { ...opts, _retry: true });
+      const r = playElement(url, volume, maxSec, startAt, clipDur, { ...opts, _retry: true });
       r.finished.then(end);
       return;
     }

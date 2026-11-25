@@ -6,7 +6,7 @@ import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cyc
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
-  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
+  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
 } from './sounds.js';
 
@@ -351,15 +351,16 @@ function recompute() {
   const n = now();
   P.upcoming = upcomingBells(n - FIRE_WINDOW, P.rules, P.timetables, tz(), 7, ctx());
   P.upcomingAt = n;
-  // 앞으로 이틀 동안 쓸 파일은 미리 불러 두기
+  // v1.20: 앞으로 이틀 동안 울릴 소리는 모두 이 컴퓨터에 받아 두고 미리 풀어 둠 (가까운 종부터 차례로)
   const keep = new Set();
   const byId = soundsById();
   for (const b of P.upcoming) {
     if (b.at - n > 2 * 86400000) break;
-    if (!isBuiltin(b.soundId) && byId[b.soundId] && byId[b.soundId].url) { keep.add(byId[b.soundId].url); preloadUrl(byId[b.soundId].url); }
-    if (b.sayId && byId[b.sayId] && byId[b.sayId].url) { keep.add(byId[b.sayId].url); preloadUrl(byId[b.sayId].url); }
-    if (b.bgmId && byId[b.bgmId] && byId[b.bgmId].url) { keep.add(byId[b.bgmId].url); preloadUrl(byId[b.bgmId].url); }
-    for (const sid of [b.soundId, b.bgmId]) if (sid && isBuiltin(sid) && isStream(sid)) keep.add(builtinUrl(sid));
+    for (const id of [b.soundId, b.sayId, b.bgmId]) {
+      if (!id) continue;
+      if (!isBuiltin(id) && byId[id] && byId[id].url) { keep.add(byId[id].url); prepareUrl(byId[id].url); }
+      else if (isBuiltin(id) && isStream(id)) keep.add(builtinUrl(id));
+    }
   }
   forgetUnused(keep);
   preloadBuiltins([...new Set(P.upcoming.filter(b => b.at - n < 2 * 86400000).slice(0, 60).flatMap(b => [b.soundId, b.bgmId]).filter(Boolean))]);
@@ -460,10 +461,29 @@ function hideRinging() {
   }
 }
 
+// 오늘 남은 종의 소리가 얼마나 준비됐는지
+function soundPrep() {
+  const n = now(), byId = soundsById(), end = n + 86400000;
+  let ready = 0, total = 0;
+  const seen = new Set();
+  for (const b of P.upcoming) {
+    if (b.at < n) continue;
+    if (b.at > end) break;
+    for (const id of [b.soundId || 'b:westminster', b.sayId, b.bgmId]) {
+      if (!id || id === 'none' || seen.has(id)) continue;
+      seen.add(id);
+      if (isBuiltin(id)) { total++; if (builtinReady(id)) ready++; }
+      else if (byId[id] && byId[id].url) { const st = prepareStatus([byId[id].url]); total += st.total; ready += st.ready; }
+    }
+  }
+  return { ready, total };
+}
 function tick() {
   if (PREVIEW || !P.running || !P.space) return;
   const n = now();
   if (n - P.upcomingAt > 60000) recompute();
+  // 종 5초 전: 오디오 장치를 미리 깨워 둠 (첫 소리가 끊기지 않게)
+  if (P.started) { const nb = P.upcoming.find(b => b.at > n); if (nb && nb.at - n < 5000 && P.warmed !== nb.key) { P.warmed = nb.key; warmUp(); } }
   const fired = firedSet();
   for (const b of P.upcoming) {
     if (b.at > n) break;
@@ -530,7 +550,8 @@ function draw() {
     [P.offsetOk, CLOCK_SRC[P.clock || (P.offsetOk ? 'saved' : 'device')]],
     [true, '7일 일정 저장됨'],
     [!!P.wake || !('wakeLock' in navigator), P.wake ? '화면 켜짐 유지' : (('wakeLock' in navigator) ? '화면 켜짐 유지 안 됨' : '화면 꺼짐을 "안 함"으로')],
-    [audioReady(), audioReady() ? '소리 준비됨' : '소리 대기']
+    [audioReady(), audioReady() ? '소리 준비됨' : '소리 대기'],
+    ...(() => { const st = soundPrep(); return st.total ? [[st.ready === st.total, st.ready === st.total ? `오늘 소리 ${st.total}개 미리 받음` : `소리 받는 중 ${st.ready}/${st.total}`]] : []; })()
   ];
   const ck = ok => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${ok ? (DARK_MODES.includes(mode) ? '#4CC28A' : '#2F6B4F') : '#A23B2A'}" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">${ok ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 7v6M12 17v.5"/>'}</svg>`;
   const foot = `<div class="pl-foot">
@@ -868,6 +889,8 @@ function drawMenu() {
   } else {
     mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
       <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
+      ${(() => { const st = soundPrep(); return `<div class="set-sub"><b>소리 미리 받아 두기</b> <span class="tiny muted">오늘 남은 종 소리 ${st.total}개 중 ${st.ready}개 준비됨${st.total && st.ready === st.total ? ' ✓' : ' · 차례로 받는 중'}</span></div>`; })()}
+      <div class="tiny muted">앞으로 이틀 동안 울릴 소리(올린 파일·안내 방송·배경음악 포함)를 이 컴퓨터에 저장하고 미리 풀어 둬요. 울리는 순간에는 인터넷을 쓰지 않아요.</div>
       <div class="set-sub"><b>성능</b> <span class="tiny muted">소리가 깨지거나 화면이 버벅이면 [가볍게]</span></div>
       <div class="chips wrap">${[['auto', '자동 (추천)'], ['lite', '가볍게'], ['full', '화려하게']].map(([v, t]) => `<button class="chip ${perfMode() === v ? 'on' : ''}" data-pl="perf" data-v="${v}">${t}</button>`).join('')}</div>
       <div class="tiny muted">지금: ${h(perfWhy())}. 가볍게 = 그림자·흐림·깜빡임 효과 끄기 (소리는 그대로예요)</div>
