@@ -6,7 +6,7 @@ import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cyc
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
-  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, syncStore, storeStatus, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
+  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, syncStore, storeStatus, setQuiet, playLog, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
 } from './sounds.js';
 
@@ -71,6 +71,14 @@ function fillGateGroups() {
 }
 const soundsById = () => Object.fromEntries(P.sounds.map(s => [s.id, s]));
 const myDoc = () => F.doc(F.db, 'spaces', P.saved.spaceId, 'devices', P.uid);
+// v1.22 조용히 울리기: 종 30초 전부터 소리가 끝날 때까지는 서버 쓰기·시계 맞추기·일정 계산·파일 받기를 멈춰요
+const QUIET_BEFORE = 30000;
+function isQuiet() {
+  if (P.ringing) return true;
+  const n = Date.now() + (P.offset || 0);
+  const nb = (P.upcoming || []).find(b => b.at > n - 2000);
+  return !!(nb && nb.at - n < QUIET_BEFORE);
+}
 const sub = n => F.collection(F.db, 'spaces', P.saved.spaceId, n);
 
 const LOGO = '<svg viewBox="0 0 120 120" width="36" height="36" aria-hidden="true"><rect x="4" y="4" width="112" height="112" rx="28" fill="#E0B25A"/><path d="M60 26 C46 26 38 37 38 52 L38 66 L31 75 L89 75 L82 66 L82 52 C82 37 74 26 60 26 Z" fill="#17231F"/><circle cx="60" cy="84" r="6" fill="#17231F"/><path d="M24 46 C20 52 20 60 24 66" fill="none" stroke="#17231F" stroke-width="5" stroke-linecap="round"/><path d="M96 46 C100 52 100 60 96 66" fill="none" stroke="#17231F" stroke-width="5" stroke-linecap="round"/></svg>';
@@ -326,6 +334,7 @@ function setClock(off, src) {
 }
 async function refreshOffset() {
   if (PREVIEW || !P.saved || clockBusy) return;
+  if (isQuiet()) { clearTimeout(clockTimer); clockTimer = setTimeout(refreshOffset, 60000); return; }
   clockBusy = true; clearTimeout(clockTimer);
   let ok = false;
   try {
@@ -355,7 +364,7 @@ function recompute() {
   const keep = new Set();
   const byId = soundsById();
   for (const b of P.upcoming) {
-    if (b.at - n > 2 * 86400000) break;
+    if (b.at - n > 6 * 3600000) break;   // 메모리에 풀어 두는 건 앞으로 6시간 치만 (저사양 컴퓨터 메모리 아끼기 · 저장본은 일정 전체)
     for (const id of [b.soundId, b.sayId, b.bgmId]) {
       if (!id) continue;
       if (!isBuiltin(id) && byId[id] && byId[id].url) { keep.add(byId[id].url); prepareUrl(byId[id].url); }
@@ -387,6 +396,7 @@ function pushSetting(k, v) {
 }
 async function heartbeat() {
   if (PREVIEW || !P.saved || !P.running) return;
+  if (isQuiet()) return;   // 다음 번에 보냄
   const next = P.upcoming.find(b => b.at > now());
   try {
     await F.updateDoc(myDoc(), {
@@ -440,7 +450,10 @@ function ring(b, extra) {
   const vol = Math.round((b.volume == null ? 100 : b.volume) * (P.opt.vol || 100) / 100);
   const ctl = playBell({ ...b, volume: vol }, Object.assign(soundsById(), extra || {}));
   P.ringing = ctl;
-  ctl.finished.then(() => { if (P.ringing === ctl) { P.ringing = null; hideRinging(); } });
+  ctl.finished.then(() => {
+    if (P.ringing === ctl) { P.ringing = null; hideRinging(); }
+    setTimeout(() => { logRing(b); heartbeat(); }, 3000);   // 기록은 소리가 다 끝난 뒤에
+  });
 }
 function showRinging(b) {
   overlay.classList.remove('hidden');
@@ -459,6 +472,8 @@ function hideRinging() {
   if (ringWatch) {
     ringWatch = false;
     const secs = Math.max(1, (performance.now() - (P.ringT0 || 0)) / 1000);
+    const hows = playLog.filter(x => x.at >= Date.now() - secs * 1000 - 3000).map(x => x.how);
+    P.lastRing = { at: Date.now(), secs, longMs: ringLongMs, hows };
     // 울리는 동안 15% 넘게 화면이 멈춰 있었으면 버거운 컴퓨터 → 자동 모드에서 다음부터 가볍게
     if (perfMode() === 'auto' && !perfLite() && ringLongMs / (secs * 1000) > 0.15) { lsSet(LS_SLOW, '1'); applyPerf(); }
   }
@@ -502,15 +517,26 @@ function soundPrep() {
 function tick() {
   if (PREVIEW || !P.running || !P.space) return;
   const n = now();
-  if (n - P.upcomingAt > 60000) recompute();
-  // 종 5초 전: 오디오 장치를 미리 깨워 둠 (첫 소리가 끊기지 않게)
-  if (P.started) { const nb = P.upcoming.find(b => b.at > n); if (nb && nb.at - n < 5000 && P.warmed !== nb.key) { P.warmed = nb.key; warmUp(); } }
+  const q = isQuiet();
+  setQuiet(q);
+  if (!q && n - P.upcomingAt > 60000) recompute();   // 조용한 시간에는 일정 계산도 쉼
+  const nb = P.upcoming.find(b => b.at > n);
+  if (P.started && nb) {
+    // 종 2분 전: 이 종의 소리를 줄 서지 않고 바로 풀어 둠
+    if (nb.at - n < 120000 && P.urged !== nb.key) {
+      P.urged = nb.key;
+      const byId = soundsById();
+      for (const id of [nb.soundId, nb.sayId, nb.bgmId]) if (id && !isBuiltin(id) && byId[id] && byId[id].url) prepareUrl(byId[id].url, true);
+    }
+    // 종 5초 전: 오디오 장치를 미리 깨워 둠 (첫 소리가 끊기지 않게)
+    if (nb.at - n < 5000 && P.warmed !== nb.key) { P.warmed = nb.key; warmUp(); }
+  }
   const fired = firedSet();
   for (const b of P.upcoming) {
     if (b.at > n) break;
     if (n - b.at > FIRE_WINDOW || fired[b.key]) continue;
     markFired(b.key);
-    if (P.started) { ring(b); logRing(b); }
+    if (P.started) ring(b);
   }
 }
 
@@ -913,6 +939,11 @@ function drawMenu() {
       ${(() => { const st = soundPrep(); return `<div class="set-sub"><b>인터넷 없이도 울리기</b></div>
         <div class="tiny">${h(offlineLine() || '일정에 소리가 아직 없어요')}</div>
         <div class="tiny muted">오늘 남은 종 소리 ${st.total}개 중 ${st.ready}개는 바로 울릴 수 있게 풀어 둠. 일정(시간표)에 나오는 모든 소리를 이 컴퓨터에 저장하고, 일정이 바뀌면 바뀐 소리만 새로 받아요. 새로 고침하거나 컴퓨터를 다시 켜도 저장본으로 울려요.</div>`; })()}
+      ${P.lastRing ? (() => { const r = P.lastRing, HOW = { buffer: '미리 풀어 둔 소리', 'buffer-late': '방금 푼 소리', blob: '저장본', saved: '저장본', internet: '인터넷에서 받으며' };
+        const ways = [...new Set(r.hows.map(x => HOW[x] || x))];
+        const ok = r.hows.every(x => x === 'buffer' || x === 'blob') && r.longMs < 500;
+        return `<div class="set-sub"><b>지난 종 진단</b> <span class="tiny ${ok ? 'ok-txt' : 'muted'}">${ok ? '✓ 문제없음' : '확인 필요'}</span></div>
+          <div class="tiny muted">${new Date(r.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} · 재생: ${ways.length ? h(ways.join(' · ')) : '기본 종소리'} · 울리는 동안 컴퓨터가 멈춘 시간 ${(r.longMs / 1000).toFixed(1)}초</div>`; })() : ''}
       <div class="set-sub"><b>성능</b> <span class="tiny muted">소리가 깨지거나 화면이 버벅이면 [가볍게]</span></div>
       <div class="chips wrap">${[['auto', '자동 (추천)'], ['lite', '가볍게'], ['full', '화려하게']].map(([v, t]) => `<button class="chip ${perfMode() === v ? 'on' : ''}" data-pl="perf" data-v="${v}">${t}</button>`).join('')}</div>
       <div class="tiny muted">지금: ${h(perfWhy())}. 가볍게 = 그림자·흐림·깜빡임 효과 끄기 (소리는 그대로예요)</div>

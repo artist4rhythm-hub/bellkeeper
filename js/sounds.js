@@ -424,7 +424,14 @@ function playBuffer(buffer, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, 
 // 1) 파일을 이 컴퓨터에 저장(캐시) → 새로 고침·업데이트 뒤에도 인터넷 없이 바로
 // 2) 울리기 전에 미리 풀어서(디코딩) 메모리에 → 울리는 순간에는 재생만
 const AUDIO_CACHE = 'bk-audio-v1';
-const BIG_FILE = 6 * 1024 * 1024;   // 6MB 넘는 긴 파일(배경음악 등)은 풀어 두지 않고 저장된 파일로 바로 재생 (메모리 아끼기)
+const BIG_FILE = 2 * 1024 * 1024;   // 2MB(약 2분) 넘는 긴 파일(배경음악 등)은 메모리에 다 풀지 않고 저장본에서 바로 재생 (저사양 컴퓨터 메모리 아끼기)
+// ── 조용히 울리기 (v1.22): 종 30초 전 ~ 소리가 끝날 때까지는 받기·풀기 같은 일을 멈추고 소리에만 힘을 써요 ──
+let quiet = false;
+export function setQuiet(on) { quiet = !!on; }
+const untilCalm = () => new Promise(r => { const t = () => quiet ? setTimeout(t, 500) : r(); t(); });
+// 재생 기록 (어떤 길로 재생됐는지 — [이 기기]에서 확인)
+export const playLog = [];
+function logPlay(url, how) { playLog.push({ url, how, at: Date.now() }); if (playLog.length > 20) playLog.shift(); }
 async function getBytes(url) {
   let cache = null;
   try { cache = await caches.open(AUDIO_CACHE); const hit = await cache.match(url); if (hit) return await hit.arrayBuffer(); } catch (e) { cache = null; }
@@ -443,6 +450,7 @@ let storeReady = (async () => { try { const c = await caches.open(AUDIO_CACHE); 
 let storeChain = Promise.resolve(), storeSig = '';
 async function storeOne(url) {
   if (stored.has(url)) return;
+  await untilCalm();
   try {
     const c = await caches.open(AUDIO_CACHE);
     if (await c.match(url)) { stored.add(url); return; }
@@ -476,16 +484,18 @@ export function storeStatus(keepAll) {
 const prep = new Map();      // url → Promise<{ buf } | { blobUrl }>
 const prepDone = new Map();  // url → 준비된 값
 let prepChain = Promise.resolve();
-export function prepareUrl(url) {
+export function prepareUrl(url, urgent = false) {
   if (!url) return null;
   if (!prep.has(url)) {
-    // 한 번에 하나씩 차례로 준비 (느린 컴퓨터에 부담 안 주게)
-    const p = prepChain.then(async () => {
+    // 한 번에 하나씩 차례로 준비 (느린 컴퓨터에 부담 안 주게) · 곧 울릴 소리(urgent)는 줄 서지 않고 바로
+    const job = async () => {
+      if (!urgent) await untilCalm();
       const ab = await getBytes(url);
       if (ab.byteLength > BIG_FILE) return { blobUrl: URL.createObjectURL(new Blob([ab])) };
       return { buf: await decode(ab) };
-    });
-    prepChain = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 60)));
+    };
+    const p = urgent ? job() : prepChain.then(job);
+    if (!urgent) prepChain = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 60)));
     p.then(v => prepDone.set(url, v), () => { prep.delete(url); });
     prep.set(url, p);
   }
@@ -557,14 +567,21 @@ function isBuiltinUrl(url) { try { return new URL(url, location.href).origin ===
 function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}) {
   // 미리 준비된 소리가 있으면 그것으로 (끊김 없음) · 아직이면 잠깐(최대 2.5초) 기다렸다가 · 그래도 안 되면 예전 방식
   const ready = prepDone.get(url);
-  if (ready && ready.buf) return playBuffer(ready.buf, volume, maxSec, startAt, clipDur, opts);
-  if (ready && ready.blobUrl) return playElement(ready.blobUrl, volume, maxSec, startAt, clipDur, opts, url);
+  if (ready && ready.buf) { logPlay(url, 'buffer'); return playBuffer(ready.buf, volume, maxSec, startAt, clipDur, opts); }
+  if (ready && ready.blobUrl) { logPlay(url, 'blob'); return playElement(ready.blobUrl, volume, maxSec, startAt, clipDur, opts, url); }
   let inner = null, stopped = false, resolveEnd;
   const finished = new Promise(r => { resolveEnd = r; });
   const p = prepareUrl(url) || Promise.reject(new Error('no url'));
   Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), 2500))])
-    .then(v => v.buf ? playBuffer(v.buf, volume, maxSec, startAt, clipDur, opts) : playElement(v.blobUrl, volume, maxSec, startAt, clipDur, opts, url),
-          () => playElement(url, volume, maxSec, startAt, clipDur, opts))
+    .then(v => { logPlay(url, v.buf ? 'buffer-late' : 'blob'); return v.buf ? playBuffer(v.buf, volume, maxSec, startAt, clipDur, opts) : playElement(v.blobUrl, volume, maxSec, startAt, clipDur, opts, url); },
+          // 아직 못 풀었으면: 이 컴퓨터에 저장된 파일로 바로 재생 → 그것도 없을 때만 인터넷에서
+          async () => {
+            try {
+              const c = await caches.open(AUDIO_CACHE); const hit = await c.match(url);
+              if (hit) { const bu = URL.createObjectURL(await hit.blob()); logPlay(url, 'saved'); return playElement(bu, volume, maxSec, startAt, clipDur, opts, url); }
+            } catch (e) { /* 아래로 */ }
+            logPlay(url, 'internet'); return playElement(url, volume, maxSec, startAt, clipDur, opts);
+          })
     .then(c => { inner = c; if (stopped) c.stop(); c.finished.then(resolveEnd); });
   return { finished, stop() { stopped = true; if (inner) inner.stop(); else setTimeout(resolveEnd, 50); } };
 }
