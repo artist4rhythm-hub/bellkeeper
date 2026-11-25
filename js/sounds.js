@@ -307,20 +307,32 @@ export function isStream(id) { const s = builtinInfo(id); return !!(s && s.strea
 let ctx = null;
 let master = null;
 let analyserNode = null;
-export function getAnalyser() { return analyserNode; }
+let wantAnalyser = true;
+export function getAnalyser() { return wantAnalyser ? analyserNode : null; }
+// v1.19: 가벼운 모드에서는 분석기를 아예 빼서 소리만 바로 내보내요 (저사양 컴퓨터에서 소리가 깨지지 않게)
+function wire() {
+  if (!ctx || !master) return;
+  try { master.disconnect(); } catch (e) { /* 무시 */ }
+  if (analyserNode) { try { analyserNode.disconnect(); } catch (e) { /* 무시 */ } }
+  if (wantAnalyser && analyserNode) { master.connect(analyserNode); analyserNode.connect(ctx.destination); }
+  else master.connect(ctx.destination);
+}
+export function setAnalyserEnabled(on) { on = !!on; if (on === wantAnalyser) return; wantAnalyser = on; wire(); }
 export function audioCtx() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    ctx = new AC();
+    // 종소리는 아주 짧은 반응 속도가 필요 없어서 'playback'(버퍼 넉넉하게)으로 — 느린 컴퓨터에서 소리 끊김·깨짐이 크게 줄어요
+    try { ctx = new AC({ latencyHint: 'playback' }); } catch (e) { ctx = new AC(); }
     master = ctx.createDynamicsCompressor();
-    // 화면의 실시간 주파수 막대(RTA)용 분석기: 모든 소리가 여기를 지나가요
+    // 화면의 실시간 주파수 막대(RTA)용 분석기
     try {
       analyserNode = ctx.createAnalyser();
-      analyserNode.fftSize = 8192;
+      analyserNode.fftSize = 4096;
+      analyserNode.minDecibels = -95;
+      analyserNode.maxDecibels = -25;
       analyserNode.smoothingTimeConstant = 0.55;
-      master.connect(analyserNode);
-      analyserNode.connect(ctx.destination);
-    } catch (e) { analyserNode = null; master.connect(ctx.destination); }
+    } catch (e) { analyserNode = null; }
+    wire();
   }
   return ctx;
 }

@@ -6,10 +6,9 @@ import { themeGridHtml, themeHeadHtml, optTabsHtml, optPanelHtml, themeOpts, cyc
 import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPalette, digiPickerHtml, HG_GRID, HG_STYLES, hangulLit, hourWord, sinoNum, monthWord, dayWord, hanjaNum } from './faces.js';
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
-  playBell, stopAll, unlockAudio, audioReady, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
+  playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
   deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
 } from './sounds.js';
-import { createRTA } from './rta.js';
 
 const el = document.getElementById('pl');
 const gate = document.getElementById('gate');
@@ -402,6 +401,35 @@ async function heartbeat() {
   } catch (e) { console.warn(e); }
 }
 
+// ── 성능 (v1.19): 느린 컴퓨터에서는 가볍게 — 소리 막대·그림자 효과를 끄고 소리에 힘을 몰아줘요 ──
+const LS_PERF = 'bk.perf', LS_SLOW = 'bk.perf.slow';
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 무시 */ } };
+const CORES = navigator.hardwareConcurrency || 0, MEM = navigator.deviceMemory || 0;
+const LOW_SPEC = (CORES && CORES <= 4) || (MEM && MEM <= 4);
+const perfMode = () => ['auto', 'lite', 'full'].includes(lsGet(LS_PERF)) ? lsGet(LS_PERF) : 'auto';
+function perfLite() { const m = perfMode(); return m === 'lite' || (m === 'auto' && (LOW_SPEC || lsGet(LS_SLOW) === '1')); }
+function perfWhy() {
+  const m = perfMode();
+  if (m === 'lite') return '가볍게 (직접 고름)';
+  if (m === 'full') return '화려하게 (직접 고름)';
+  if (lsGet(LS_SLOW) === '1') return '가볍게 · 종이 울릴 때 컴퓨터가 버거워해서 저절로 바꿨어요';
+  if (LOW_SPEC) return `가볍게 · 이 컴퓨터 사양(${CORES ? `CPU ${CORES}코어` : ''}${CORES && MEM ? ' · ' : ''}${MEM ? `메모리 ${MEM}GB 이하` : ''})에 맞췄어요`;
+  return `화려하게 · 이 컴퓨터는 넉넉해요${CORES ? ` (CPU ${CORES}코어)` : ''}`;
+}
+function applyPerf() {
+  const lite = perfLite();
+  document.body.classList.toggle('lite', lite);
+  setAnalyserEnabled(false);   // v1.19: 재생기는 소리 막대를 없애서 소리 분석도 안 해요 (관리자 화면만 씀)
+  return lite;
+}
+applyPerf();
+// 종이 울리는 동안 화면이 오래 멈춘 시간(긴 작업)을 재서, 버거우면 다음부터 가볍게
+let ringLongMs = 0, ringWatch = false;
+try {
+  new PerformanceObserver(list => { if (ringWatch) for (const e of list.getEntries()) ringLongMs += e.duration; }).observe({ entryTypes: ['longtask'] });
+} catch (e) { /* 지원 안 하면 사양으로만 판단 */ }
+
 // ── 종 울리기 ─────────────────────────────────────
 function ring(b, extra) {
   showRinging(b);
@@ -412,18 +440,25 @@ function ring(b, extra) {
 }
 function showRinging(b) {
   overlay.classList.remove('hidden');
-  overlay.innerHTML = `<svg class="ring-pulse" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
+  overlay.innerHTML = `<div class="ring-live" aria-hidden="true"><i></i>소리 나가는 중</div>
+    <svg class="ring-pulse" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
     <div class="lab">${h(b.label || '종')}</div>
-    <canvas class="pl-rta" aria-hidden="true"></canvas>
+
     <div style="font-size:20px;color:#C9D1CC">${h(b.time || '')} ${h(isBuiltin(b.soundId) ? builtinName(b.soundId) : ((soundsById()[b.soundId] || {}).name || ''))}</div>
     ${b.say ? `<div style="font-size:20px">"${h(b.say)}"</div>` : ''}
     <button class="btn lg" id="ring-stop" style="background:transparent;color:#F4F5F2;border-color:#3A4842">소리 멈추기</button>`;
   document.getElementById('ring-stop').onclick = () => { stopAll(); hideRinging(); };
-  if (P.rta) P.rta.kill();
-  P.rta = createRTA(overlay.querySelector('.pl-rta'));
-  P.rta.start();
+  ringLongMs = 0; ringWatch = true; P.ringT0 = performance.now();
 }
-function hideRinging() { if (P.rta) { P.rta.kill(); P.rta = null; } overlay.classList.add('hidden'); overlay.innerHTML = ''; }
+function hideRinging() {
+  overlay.classList.add('hidden'); overlay.innerHTML = '';
+  if (ringWatch) {
+    ringWatch = false;
+    const secs = Math.max(1, (performance.now() - (P.ringT0 || 0)) / 1000);
+    // 울리는 동안 15% 넘게 화면이 멈춰 있었으면 버거운 컴퓨터 → 자동 모드에서 다음부터 가볍게
+    if (perfMode() === 'auto' && !perfLite() && ringLongMs / (secs * 1000) > 0.15) { lsSet(LS_SLOW, '1'); applyPerf(); }
+  }
+}
 
 function tick() {
   if (PREVIEW || !P.running || !P.space) return;
@@ -833,6 +868,9 @@ function drawMenu() {
   } else {
     mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
       <button class="btn block" data-pl="fullscreen">전체 화면으로 보기</button>
+      <div class="set-sub"><b>성능</b> <span class="tiny muted">소리가 깨지거나 화면이 버벅이면 [가볍게]</span></div>
+      <div class="chips wrap">${[['auto', '자동 (추천)'], ['lite', '가볍게'], ['full', '화려하게']].map(([v, t]) => `<button class="chip ${perfMode() === v ? 'on' : ''}" data-pl="perf" data-v="${v}">${t}</button>`).join('')}</div>
+      <div class="tiny muted">지금: ${h(perfWhy())}. 가볍게 = 그림자·흐림·깜빡임 효과 끄기 (소리는 그대로예요)</div>
       <div class="tiny muted">벨키퍼 ${APP_VERSION}${P.update && P.update.isNew ? ` (새 버전 ${P.update.latest} 있음)` : ' (최신)'} · ${h(CLOCK_SRC[P.clock || 'device'])} · 이 기기 시계와 ${(Math.abs(P.offset) / 1000).toFixed(1)}초 차이를 맞춰서 울려요 · ${P.locked ? '잠금 켜짐' : '잠금 꺼짐 (관리자 화면에서 켤 수 있어요)'}</div>
       <button class="btn block danger" data-pl="unlink">이 기기 연결 해제</button></section>`;
   }
@@ -1028,6 +1066,7 @@ document.addEventListener('click', async e => {
   if (a === 'unlock') return openPin('');
   if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
+  if (a === 'perf') { lsSet(LS_PERF, b.dataset.v); if (b.dataset.v !== 'auto') lsSet(LS_SLOW, null); applyPerf(); drawMenu(); draw(); return; }
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); pushSetting('saver', P.opt.saver); drawMenu(); mountPreview(); return; }
   if (a === 'st') {
     const patch = screenPatch(b.dataset.k, b.dataset.v);
@@ -1112,7 +1151,7 @@ if (!PREVIEW && 'serviceWorker' in navigator) navigator.serviceWorker.register('
 watchUpdates(u => { P.update = u; draw(); autoUpdateTick(); }, 10 * 60 * 1000);
 setInterval(autoUpdateTick, 60 * 1000);
 setInterval(tick, 250);
-setInterval(() => { if (gate.classList.contains('hidden')) draw(); }, 1000);
+setInterval(() => { if (gate.classList.contains('hidden') && overlay.classList.contains('hidden')) draw(); }, 1000);   // 종 화면이 덮고 있을 땐 뒤 화면을 다시 그리지 않음
 setInterval(heartbeat, HEARTBEAT_MS);
 
 if (PREVIEW) {

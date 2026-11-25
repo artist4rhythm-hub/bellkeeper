@@ -1111,3 +1111,14 @@ body.nocursor, body.nocursor * { cursor: none !important; }
 .cs-thumb.plain { background: radial-gradient(ellipse at 50% 40%, #3C4A44, #1B2320); }
 .cs-dials { width: 100%; }
 @media (max-width: 560px) { .st-ways { grid-template-columns: 1fr; } }
+
+/* ── v1.19 가볍게 (저사양 컴퓨터): 그림자·흐림·움직임 효과 끄기 ── */
+body.lite .pl *, body.lite .pl-ringing * { filter: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; animation: none !important; transition: none !important; }
+body.lite .pl.clockscr .cs-date { background: rgba(20,24,22,.6); }
+body.lite .pl.clockscr .cs-face svg { box-shadow: none; }
+.set-sub { margin-top: 10px; font-size: 14px; }
+
+/* v1.19 종 울릴 때 "소리 나가는 중" 작은 표시 (소리 막대 대신 — 거의 힘을 안 씀) */
+.ring-live { position: absolute; top: max(18px, 3vh); right: max(20px, 3vw); display: inline-flex; align-items: center; gap: 9px; padding: 8px 15px 8px 12px; border-radius: 999px; background: rgba(224,178,90,.14); border: 1px solid rgba(224,178,90,.35); color: #F1D9A6; font-size: clamp(14px, 1.8vh, 19px); font-weight: 700; }
+.ring-live i { width: 11px; height: 11px; border-radius: 50%; background: #E0B25A; animation: ringLive 1s ease-in-out infinite; will-change: opacity; }
+@keyframes ringLive { 50% { opacity: .25; } }
