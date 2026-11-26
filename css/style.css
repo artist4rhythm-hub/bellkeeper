@@ -1122,3 +1122,38 @@ body.lite .pl.clockscr .cs-face svg { box-shadow: none; }
 .ring-live { position: absolute; top: max(18px, 3vh); right: max(20px, 3vw); display: inline-flex; align-items: center; gap: 9px; padding: 8px 15px 8px 12px; border-radius: 999px; background: rgba(224,178,90,.14); border: 1px solid rgba(224,178,90,.35); color: #F1D9A6; font-size: clamp(14px, 1.8vh, 19px); font-weight: 700; }
 .ring-live i { width: 11px; height: 11px; border-radius: 50%; background: #E0B25A; animation: ringLive 1s ease-in-out infinite; will-change: opacity; }
 @keyframes ringLive { 50% { opacity: .25; } }
+
+/* ── 종 알림 띠 (v1.24): 지금 화면을 그대로 두고 아래쪽에 작게 ── */
+.pl-ringing.bar { inset: auto max(16px, 2.5vw) max(16px, 2.5vw) max(16px, 2.5vw); flex-direction: row; justify-content: flex-start; align-items: center; gap: clamp(12px, 1.6vw, 22px);
+  padding: clamp(12px, 1.6vh, 18px) clamp(16px, 2vw, 26px); border-radius: clamp(14px, 1.8vw, 22px); background: rgba(16,22,19,.97); border: 1px solid rgba(224,178,90,.4);
+  box-shadow: 0 12px 32px -12px rgba(0,0,0,.55); text-align: left; animation: rbIn .35s ease-out; }
+@keyframes rbIn { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.pl-ringing.bar .rb-ic { flex: none; display: flex; }
+.pl-ringing.bar .rb-ic svg { width: clamp(26px, 3.2vh, 38px); height: auto; }
+.pl-ringing.bar .rb-tx { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.pl-ringing.bar .rb-tx b { font-size: clamp(18px, 2.8vh, 30px); font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-ringing.bar .rb-tx > span { font-size: clamp(13px, 1.9vh, 20px); color: #C9D1CC; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-ringing.bar .rb-prog { height: 6px; border-radius: 99px; background: rgba(255,255,255,.16); overflow: hidden; margin-top: 4px; }
+.pl-ringing.bar .rb-prog i { display: block; height: 100%; background: #E0B25A; transition: width 1s linear; }
+.pl-ringing.bar .ring-live { position: static; flex: none; }
+.pl-ringing.bar .rb-stop { flex: none; font: inherit; font-size: clamp(14px, 1.8vh, 18px); font-weight: 700; padding: 9px 18px; border-radius: 99px; border: 1px solid rgba(255,255,255,.35); background: transparent; color: #F4F5F2; cursor: pointer; }
+.pl-ringing.bar .rb-stop:hover { background: rgba(255,255,255,.08); }
+@media (max-width: 560px) { .pl-ringing.bar .ring-live { display: none; } }
+body.lite .pl-ringing.bar { box-shadow: none; animation: none; }
+
+/* ── 일과표: 음악 시간 (v1.24) ── */
+.be-row.music { background: linear-gradient(90deg, rgba(224,178,90,.12), var(--card) 60%); }
+.be-row .be-msum { grid-area: sound; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px dashed var(--brass-line, #C9A456); background: transparent; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.be-row .be-msum .mu-ic { color: #B68A2E; font-size: 18px; }
+@media (min-width: 900px) { .be-row.music { grid-template-areas: "cb time label sound sound acts"; } }
+@media (min-width: 1400px) { .be-row.music > .be-msum { grid-column: span 4 !important; } }
+.mu-ed { display: grid; gap: 12px; }
+.mu-f { display: grid; gap: 6px; }
+.mu-f > b { font-size: 14px; }
+.mu-list { display: grid; gap: 6px; }
+.mu-it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+.mu-it .mu-n { width: 22px; height: 22px; border-radius: 50%; background: var(--ground-2); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none; }
+.mu-it .mu-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.mu-it .mu-len { font-size: 12px; color: var(--muted); flex: none; }
+.mu-custom { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.mu-custom input { width: 72px; min-height: 36px; }

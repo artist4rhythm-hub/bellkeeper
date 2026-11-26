@@ -1,7 +1,7 @@
 // 벨키퍼 공통 로직 — 관리자 화면과 재생기가 함께 씁니다.
 // 시간대 계산, 규칙 우선순위, 하루 종 목록 계산.
 
-export const APP_VERSION = '1.23.0';
+export const APP_VERSION = '1.24.0';
 
 export const SPACE_TYPES = [
   { id: 'school', label: '학교' },
@@ -348,6 +348,7 @@ export function randomCode(len, chars) {
 }
 
 // 저장 전 종 목록 정리
+export const MUSIC_DURS = [5, 10, 15, 20, 30];
 export function cleanBells(bells) {
   return (bells || [])
     .filter(b => b && /^\d{2}:\d{2}(:\d{2})?$/.test(b.time || ''))
@@ -372,6 +373,16 @@ export function cleanBells(bells) {
         o.bgmId = String(b.bgmId).slice(0, 80);
         const bv = Number(b.bgmVol);
         o.bgmVol = Number.isFinite(bv) ? Math.min(100, Math.max(5, Math.round(bv))) : 30;
+      }
+      // 음악 시간 (v1.24): 여러 곡을 정해 둔 분 동안 이어서
+      if (b.kind === 'music') {
+        o.kind = 'music';
+        o.playlist = (Array.isArray(b.playlist) ? b.playlist : []).map(x => String(x || '').slice(0, 80)).filter(Boolean).slice(0, 20);
+        const dm = Math.round(Number(b.durMin));
+        o.durMin = Number.isFinite(dm) && dm > 0 ? Math.min(60, dm) : 10;
+        o.order = b.order === 'shuffle' ? 'shuffle' : 'seq';
+        o.soundId = 'none';
+        o.say = ''; delete o.sayId; delete o.repeat; delete o.sayRepeat; delete o.bgmId; delete o.bgmVol; o.maxSec = 0;
       }
       return o;
     })

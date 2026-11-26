@@ -7,7 +7,7 @@ import { clockSvg, inkArt, inkClock, INK_SCENES, DIGI_STYLES, digitalSvg, digiPa
 import { watchUpdates, reloadToLatest } from './version.js';
 import {
   playBell, stopAll, unlockAudio, audioReady, setAnalyserEnabled, prepareUrl, prepareStatus, builtinReady, warmUp, syncStore, storeStatus, setQuiet, playLog, preloadUrl, forgetUnused, builtinName, isBuiltin, preloadBuiltins, isStream, builtinUrl,
-  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, probeCors, playMusic, stopMusic
 } from './sounds.js';
 
 const el = document.getElementById('pl');
@@ -70,6 +70,10 @@ function fillGateGroups() {
   box.innerHTML = realGroups().length ? `<div class="small bold" style="text-align:left">이 재생기의 재생 그룹</div>${groupPickerHtml()}` : '';
 }
 const soundsById = () => Object.fromEntries(P.sounds.map(s => [s.id, s]));
+// 종 하나가 쓰는 소리들 (음악 시간이면 곡 목록)
+const idsOf = b => b.kind === 'music' ? (b.playlist || []) : [b.soundId || 'b:westminster', b.sayId, b.bgmId];
+const isMusic = b => !!b && b.kind === 'music';
+const ringView = () => P.opt.ringView === 'full' ? 'full' : 'bar';
 const myDoc = () => F.doc(F.db, 'spaces', P.saved.spaceId, 'devices', P.uid);
 // v1.22 조용히 울리기: 종 30초 전부터 소리가 끝날 때까지는 서버 쓰기·시계 맞추기·일정 계산·파일 받기를 멈춰요
 const QUIET_BEFORE = 30000;
@@ -292,7 +296,7 @@ function startRunning() {
       // 이 화면을 켜기 전에 보낸 명령과 2분 넘게 지난 명령은 무시
       if (at < P.listenSince || now() - at > 120000) continue;
       if (c.target && c.target !== P.uid) continue;
-      if (c.type === 'stop') { stopAll(); hideRinging(); }
+      if (c.type === 'stop') { stopAll(); hideRinging(); stopMusicNow(); }
       if (c.type === 'reload') { P.allowLeave = true; setTimeout(() => reloadToLatest(), 800); continue; }
       if (c.type === 'ring') {
         const extra = c.sayUrl ? { __cmd: { url: c.sayUrl } } : null;
@@ -365,17 +369,17 @@ function recompute() {
   const byId = soundsById();
   for (const b of P.upcoming) {
     if (b.at - n > 6 * 3600000) break;   // 메모리에 풀어 두는 건 앞으로 6시간 치만 (저사양 컴퓨터 메모리 아끼기 · 저장본은 일정 전체)
-    for (const id of [b.soundId, b.sayId, b.bgmId]) {
-      if (!id) continue;
+    for (const id of idsOf(b)) {
+      if (!id || id === 'none') continue;
       if (!isBuiltin(id) && byId[id] && byId[id].url) { keep.add(byId[id].url); prepareUrl(byId[id].url); }
       else if (isBuiltin(id) && isStream(id)) keep.add(builtinUrl(id));
     }
   }
-  if (!P.ringing) forgetUnused(keep);   // 울리는 중에는 정리하지 않음
+  if (!P.ringing && !P.music) forgetUnused(keep);   // 울리는 중·음악 시간에는 정리하지 않음
   // v1.21: 일정 전체(모든 시간표·모든 요일)에 나오는 소리를 이 컴퓨터에 저장 — 인터넷이 끊겨도 울리게
   // 시간표와 소리 목록을 둘 다 받은 뒤에만 (시작할 때 잠깐 비어 있는 순간에 저장본을 지우지 않게)
   if (P.ttLoaded && P.sndLoaded) { P.keepAll = allScheduleUrls(); syncStore(P.keepAll); }
-  preloadBuiltins([...new Set(P.upcoming.filter(b => b.at - n < 2 * 86400000).slice(0, 60).flatMap(b => [b.soundId, b.bgmId]).filter(Boolean))]);
+  preloadBuiltins([...new Set(P.upcoming.filter(b => b.at - n < 2 * 86400000).slice(0, 60).flatMap(b => isMusic(b) ? b.playlist || [] : [b.soundId, b.bgmId]).filter(x => x && x !== 'none'))]);
   draw();
 }
 
@@ -446,29 +450,76 @@ try {
 
 // ── 종 울리기 ─────────────────────────────────────
 function ring(b, extra) {
+  if (isMusic(b)) { startMusic(b); return; }
   showRinging(b);
   const vol = Math.round((b.volume == null ? 100 : b.volume) * (P.opt.vol || 100) / 100);
+  if (P.music) P.music.ctl.duck(true);   // 음악 시간 중이면 음악은 잠깐 작게
   const ctl = playBell({ ...b, volume: vol }, Object.assign(soundsById(), extra || {}));
   P.ringing = ctl;
   ctl.finished.then(() => {
-    if (P.ringing === ctl) { P.ringing = null; hideRinging(); }
+    if (P.ringing === ctl) { P.ringing = null; hideRinging(); if (P.music) P.music.ctl.duck(false); }
     setTimeout(() => { logRing(b); heartbeat(); }, 3000);   // 기록은 소리가 다 끝난 뒤에
   });
 }
-function showRinging(b) {
-  overlay.classList.remove('hidden');
-  overlay.innerHTML = `<div class="ring-live" aria-hidden="true"><i></i>소리 나가는 중</div>
-    <svg class="ring-pulse" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
-    <div class="lab">${h(b.label || '종')}</div>
 
-    <div style="font-size:20px;color:#C9D1CC">${h(b.time || '')} ${h(isBuiltin(b.soundId) ? builtinName(b.soundId) : ((soundsById()[b.soundId] || {}).name || ''))}</div>
-    ${b.say ? `<div style="font-size:20px">"${h(b.say)}"</div>` : ''}
-    <button class="btn lg" id="ring-stop" style="background:transparent;color:#F4F5F2;border-color:#3A4842">소리 멈추기</button>`;
-  document.getElementById('ring-stop').onclick = () => { stopAll(); hideRinging(); };
+// ── 음악 시간 (v1.24) ─────────────────────────────────
+// 정해 둔 분 동안 곡 목록을 이어서 틀고, 끝 시각에 서서히 끝남
+const LS_MSTOP = 'bk.music.stopped';
+function musicTracks(b) {
+  const byId = soundsById();
+  return (b.playlist || []).map(id => {
+    if (isBuiltin(id)) return { url: builtinUrl(id), name: builtinName(id) };
+    const x = byId[id];
+    return x && x.url ? { url: x.url, name: x.name || '올린 소리' } : null;
+  }).filter(Boolean);
+}
+function startMusic(b, resumed) {
+  const tracks = musicTracks(b);
+  if (!tracks.length) return;
+  const endN = b.at + (b.durMin || 10) * 60000;           // 서버 시각 기준
+  if (endN - now() < 8000) return;
+  if (P.music) P.music.ctl.stop(1);
+  const vol = Math.round((b.volume == null ? 60 : b.volume) * (P.opt.vol || 100) / 100);
+  const m = { b, endN, n: tracks.length, idx: 0, name: '' };
+  m.ctl = playMusic({
+    tracks, endAt: endN - P.offset, volume: vol, shuffle: b.order === 'shuffle',
+    onTrack: (t, i) => { m.idx = i; m.name = t.name; if (P.music === m && !P.ringing) renderOverlay(); }
+  });
+  if (P.ringing) m.ctl.duck(true);
+  P.music = m;
+  try { localStorage.removeItem(LS_MSTOP); } catch (e) { /* 무시 */ }
+  m.ctl.finished.then(() => {
+    if (P.music === m) { P.music = null; if (!P.ringing) renderOverlay(); draw(); }
+    if (!resumed) setTimeout(() => { logRing(b); heartbeat(); }, 3000);
+  });
+  if (!P.ringing) renderOverlay();
+}
+function stopMusicNow() {
+  if (!P.music) return;
+  try { localStorage.setItem(LS_MSTOP, P.music.b.key); } catch (e) { /* 무시 */ }   // 직접 멈춘 음악은 새로 고침해도 다시 안 틂
+  P.music.ctl.stop();
+  P.music = null;
+  if (!P.ringing) renderOverlay();
+}
+// 음악 시간 중에 재생기를 새로 고친 경우: 남은 시간만큼 이어서
+function resumeMusic() {
+  if (PREVIEW || !P.started || P.music || !P.space) return;
+  const n = now(), key = todayKey(n, tz());
+  let stoppedKey = ''; try { stoppedKey = localStorage.getItem(LS_MSTOP) || ''; } catch (e) { /* 무시 */ }
+  const day = bellsForDay(key, P.rules, P.timetables, tz(), ctx()).bells;
+  const cur = day.filter(b => isMusic(b) && b.at <= n && n < b.at + (b.durMin || 10) * 60000 - 10000).pop();
+  if (cur && cur.key !== stoppedKey) { markFired(cur.key); startMusic(cur, true); }   // 음악 중간에 켠 경우도 남은 시간만큼
+}
+
+// 종 알림: 아래쪽 띠(기본) 또는 예전처럼 전체 화면
+function showRinging(b) {
+  P.ringBell = b;
+  renderOverlay();
   ringLongMs = 0; ringWatch = true; P.ringT0 = performance.now();
 }
 function hideRinging() {
-  overlay.classList.add('hidden'); overlay.innerHTML = '';
+  P.ringBell = null;
+  renderOverlay();
   if (ringWatch) {
     ringWatch = false;
     const secs = Math.max(1, (performance.now() - (P.ringT0 || 0)) / 1000);
@@ -478,12 +529,56 @@ function hideRinging() {
     if (perfMode() === 'auto' && !perfLite() && ringLongMs / (secs * 1000) > 0.15) { lsSet(LS_SLOW, '1'); applyPerf(); }
   }
 }
+const BELL_IC = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>';
+const NOTE_IC = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
+function soundLabel(b) { return isBuiltin(b.soundId) ? builtinName(b.soundId) : ((soundsById()[b.soundId] || {}).name || ''); }
+function fmtMS(ms) { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
+function musicLine(m) { return `${m.n > 1 ? `${m.idx + 1}/${m.n} · ` : ''}${m.name || ''}`; }
+function renderOverlay() {
+  const b = P.ringBell, m = P.music;
+  const bar = !!m && !b || (!!b && ringView() === 'bar');
+  document.body.classList.toggle('ringbar', bar && (!!b || !!m));
+  if (!b && !m) { overlay.classList.add('hidden'); overlay.classList.remove('bar'); overlay.innerHTML = ''; return; }
+  overlay.classList.remove('hidden');
+  overlay.classList.toggle('bar', bar);
+  const live = '<div class="ring-live" aria-hidden="true"><i></i>소리 나가는 중</div>';
+  if (b && !bar) {
+    overlay.innerHTML = `${live}
+      <svg class="ring-pulse" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E0B25A" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
+      <div class="lab">${h(b.label || '종')}</div>
+      <div style="font-size:20px;color:#C9D1CC">${h(b.time || '')} ${h(soundLabel(b))}</div>
+      ${b.say ? `<div style="font-size:20px">"${h(b.say)}"</div>` : ''}
+      <button class="btn lg" id="ring-stop" style="background:transparent;color:#F4F5F2;border-color:#3A4842">소리 멈추기</button>`;
+  } else if (b) {
+    const sub = [soundLabel(b), b.say ? `"${b.say}"` : ''].filter(Boolean).join(' · ');
+    overlay.innerHTML = `<div class="rb-ic">${BELL_IC}</div>
+      <div class="rb-tx"><b>${h(b.label || '종')}</b><span>${h(b.time || '')}${sub ? ' · ' + h(sub) : ''}${m ? ' · 음악은 잠깐 작게' : ''}</span></div>
+      ${live}<button class="rb-stop" id="ring-stop">멈추기</button>`;
+  } else {
+    overlay.innerHTML = `<div class="rb-ic">${NOTE_IC}</div>
+      <div class="rb-tx"><b>${h(m.b.label || '음악 시간')}</b><span><span id="rb-track">${h(musicLine(m))}</span> · 남은 시간 <span id="rb-left">${fmtMS(m.endN - now())}</span></span>
+        <div class="rb-prog"><i id="rb-bar" style="width:${musicPct(m)}%"></i></div></div>
+      ${live}<button class="rb-stop" id="ring-stop">멈추기</button>`;
+  }
+  document.getElementById('ring-stop').onclick = () => {
+    if (P.ringBell) { stopAll(); hideRinging(); } else stopMusicNow();
+  };
+}
+function musicPct(m) { const tot = m.endN - m.b.at; return Math.max(0, Math.min(100, (now() - m.b.at) / tot * 100)).toFixed(1); }
+// 1초마다: 음악 띠의 남은 시간·진행 막대만 바꿈 (전체를 다시 그리지 않음)
+function updateBar() {
+  const m = P.music;
+  if (!m || P.ringBell) return;
+  const l = document.getElementById('rb-left'), br = document.getElementById('rb-bar');
+  if (l) l.textContent = fmtMS(m.endN - now());
+  if (br) br.style.width = musicPct(m) + '%';
+}
 
 // 일정 전체에 나오는 소리 주소 (올린 파일 + 기본 종소리)
 function allScheduleUrls() {
   const byId = soundsById(), out = new Set();
   for (const t of P.timetables || []) for (const b of t.bells || []) {
-    for (const id of [b.soundId || 'b:westminster', b.sayId, b.bgmId]) {
+    for (const id of idsOf(b)) {
       if (!id || id === 'none') continue;
       if (isBuiltin(id)) out.add(builtinUrl(id));
       else if (byId[id] && byId[id].url) out.add(byId[id].url);
@@ -505,7 +600,7 @@ function soundPrep() {
   for (const b of P.upcoming) {
     if (b.at < n) continue;
     if (b.at > end) break;
-    for (const id of [b.soundId || 'b:westminster', b.sayId, b.bgmId]) {
+    for (const id of idsOf(b)) {
       if (!id || id === 'none' || seen.has(id)) continue;
       seen.add(id);
       if (isBuiltin(id)) { total++; if (builtinReady(id)) ready++; }
@@ -518,7 +613,7 @@ function tick() {
   if (PREVIEW || !P.running || !P.space) return;
   const n = now();
   const q = isQuiet();
-  setQuiet(q);
+  setQuiet(q || !!P.music);   // 음악 시간에도 파일 받기·풀기는 쉼
   if (!q && n - P.upcomingAt > 60000) recompute();   // 조용한 시간에는 일정 계산도 쉼
   const nb = P.upcoming.find(b => b.at > n);
   if (P.started && nb) {
@@ -526,7 +621,7 @@ function tick() {
     if (nb.at - n < 120000 && P.urged !== nb.key) {
       P.urged = nb.key;
       const byId = soundsById();
-      for (const id of [nb.soundId, nb.sayId, nb.bgmId]) if (id && !isBuiltin(id) && byId[id] && byId[id].url) prepareUrl(byId[id].url, true);
+      for (const id of idsOf(nb)) if (id && !isBuiltin(id) && byId[id] && byId[id].url) prepareUrl(byId[id].url, true);
     }
     // 종 5초 전: 오디오 장치를 미리 깨워 둠 (첫 소리가 끊기지 않게)
     if (nb.at - n < 5000 && P.warmed !== nb.key) { P.warmed = nb.key; warmUp(); }
@@ -564,7 +659,7 @@ function analogSvg(z, dark, dial) { return clockSvg(z, dial || P.opt.dial || 'cl
 // 쉬는 시간·밤에는 화면 보호, 정해 둔 시간마다 화면 바꾸기
 function effectiveMode(n, day) {
   if (PREVIEW) return P.opt.__clock ? 'clockscr' : P.mode;
-  if (!P.ringing) {
+  if (!P.ringing || ringView() === 'bar') {   // 아래쪽 띠로 알릴 때는 지금 화면(시계 화면 등)을 그대로
     const z = fmtClock(n, tz()).z;
     const zone = screenZone(P.opt, day.bells, n, z.h + z.mi / 60);
     if (zone === 'saver') return 'minimal';
@@ -849,7 +944,7 @@ function draw() {
         <div class="stack" style="max-width:420px">
           ${nx ? `<div class="bold num" style="color:#E0B25A;font-size:18px">${h(nx.time)}${nx.dateKey !== key ? ` · ${h(koreanDate(nx.dateKey))}` : ''}</div>
             <div style="font-size:clamp(28px,4.5vw,44px);font-weight:900;letter-spacing:-0.02em">${h(nx.label || '종')}</div>
-            <div style="font-size:18px;color:#C9D1CC">${h(isBuiltin(nx.soundId) ? builtinName(nx.soundId) : ((soundsById()[nx.soundId] || {}).name || ''))}</div>
+            <div style="font-size:18px;color:#C9D1CC">${h(isMusic(nx) ? `♫ 음악 시간 ${nx.durMin || 10}분` : (isBuiltin(nx.soundId) ? builtinName(nx.soundId) : ((soundsById()[nx.soundId] || {}).name || '')))}</div>
             ${next[1] ? `<div style="height:1px;background:#24302B;margin:10px 0"></div><div style="font-size:16px;color:#C9D1CC">그다음 · ${h(next[1].time)} ${h(next[1].label || '')}</div>` : ''}`
           : '<div style="font-size:24px;font-weight:700">앞으로 7일 동안 울릴 종이 없어요</div>'}
         </div>
@@ -932,6 +1027,9 @@ function drawMenu() {
         <select class="input" id="pl-voice">${(() => { const pref = getDeviceVoicePref(); const vs = deviceVoices();
           return vs.length ? vs.map(v => `<option value="${h(v.voiceURI)}" ${pref.uri === v.voiceURI ? 'selected' : ''}>${h(v.name)}</option>`).join('') : '<option value="">기본 목소리</option>'; })()}</select></label>
       <div class="row"><span class="small">속도</span><input type="range" id="pl-rate" min="0.7" max="1.3" step="0.1" value="${getDeviceVoicePref().rate}" class="grow"><button class="btn" data-pl="voice-test">들어보기</button></div>
+      <div class="set-sub"><b>종이 울릴 때 화면</b></div>
+      <div class="chips wrap">${[['bar', '아래쪽 알림 띠 (추천)'], ['full', '전체 화면']].map(([v, t]) => `<button class="chip ${ringView() === v ? 'on' : ''}" data-pl="ringview" data-v="${v}">${t}</button>`).join('')}</div>
+      <div class="tiny muted">알림 띠: 시계 화면을 그대로 두고 아래쪽에 작은 알림이 떴다가 소리가 끝나면 사라져요. 음악 시간은 늘 알림 띠로 보여요.</div>
       <button class="btn block" data-pl="test">소리 시험</button></section>`;
   } else {
     mainHtml = `<section class="set-card wide"><h4>이 기기</h4>
@@ -1142,6 +1240,7 @@ document.addEventListener('click', async e => {
   if (a === 'unlock') return openPin('');
   if (a === 'relock') { P.unlockedUntil = 0; await enterFull(); lockKeys(); return draw(); }
   if (a === 'pin') return pinKey(b.dataset.v);
+  if (a === 'ringview') { P.opt.ringView = b.dataset.v === 'full' ? 'full' : 'bar'; saveOpt(); drawMenu(); return; }
   if (a === 'perf') { lsSet(LS_PERF, b.dataset.v); if (b.dataset.v !== 'auto') lsSet(LS_SLOW, null); applyPerf(); drawMenu(); draw(); return; }
   if (a === 'saver') { P.opt.saver = b.dataset.v; saveOpt(); pushSetting('saver', P.opt.saver); drawMenu(); mountPreview(); return; }
   if (a === 'st') {
@@ -1203,7 +1302,7 @@ window.addEventListener('offline', draw);
 function autoUpdateTick() {
   if (PREVIEW || !P.running || !P.space || !P.update || !P.update.isNew) return;
   if (P.space.autoUpd === false) return;                     // 관리자가 끔
-  if (P.ringing || gate.dataset.kind === 'menu' || gate.dataset.kind === 'pin') return;
+  if (P.ringing || P.music || gate.dataset.kind === 'menu' || gate.dataset.kind === 'pin') return;
   const n = now(), key = todayKey(n, tz());
   const near = P.upcoming.some(b => Math.abs(b.at - n) < 3 * 60000);
   if (near) return;
@@ -1227,7 +1326,8 @@ if (!PREVIEW && 'serviceWorker' in navigator) navigator.serviceWorker.register('
 watchUpdates(u => { P.update = u; draw(); autoUpdateTick(); }, 10 * 60 * 1000);
 setInterval(autoUpdateTick, 60 * 1000);
 setInterval(tick, 250);
-setInterval(() => { if (gate.classList.contains('hidden') && overlay.classList.contains('hidden')) draw(); }, 1000);   // 종 화면이 덮고 있을 땐 뒤 화면을 다시 그리지 않음
+setInterval(() => { if (gate.classList.contains('hidden') && (overlay.classList.contains('hidden') || overlay.classList.contains('bar'))) draw(); updateBar(); }, 1000);   // 전체 화면 종 알림이 덮고 있을 땐 뒤 화면을 다시 그리지 않음
+setInterval(resumeMusic, 5000);
 setInterval(heartbeat, HEARTBEAT_MS);
 
 if (PREVIEW) {

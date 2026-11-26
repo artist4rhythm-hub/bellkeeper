@@ -413,9 +413,14 @@ function playBuffer(buffer, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, 
   if (!opts.loop || maxSec > 0) setTimeout(resolveEnd, (dur + 0.6) * 1000);
   return {
     finished,
-    stop() {
-      try { const n = c.currentTime; g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value, n); g.gain.linearRampToValueAtTime(0.0001, n + 1.6); src.stop(n + 1.7); } catch (e) { /* 무시 */ }
-      setTimeout(resolveEnd, 1750);
+    stop(fadeSec = 1.6) {
+      try { const n = c.currentTime; g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value, n); g.gain.linearRampToValueAtTime(0.0001, n + fadeSec); src.stop(n + fadeSec + 0.1); } catch (e) { /* 무시 */ }
+      setTimeout(resolveEnd, fadeSec * 1000 + 150);
+    },
+    // 소리 크기 바꾸기 (음악 시간에 종이 울리면 잠깐 작게) — 오디오 장치가 직접 부드럽게
+    setVol(nv, sec = 0.8) {
+      if (done) return;
+      try { const n = c.currentTime, t = Math.max(0.0001, Math.min(1, nv / 100)); g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value, n); g.gain.linearRampToValueAtTime(t, n + sec); } catch (e) { /* 무시 */ }
     }
   };
 }
@@ -586,8 +591,13 @@ function playUrl(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts =
             } catch (e) { /* 아래로 */ }
             logPlay(url, 'internet'); return playElement(url, volume, maxSec, startAt, clipDur, opts);
           })
-    .then(c => { inner = c; if (stopped) c.stop(); c.finished.then(resolveEnd); });
-  return { finished, stop() { stopped = true; if (inner) inner.stop(); else setTimeout(resolveEnd, 50); } };
+    .then(c => { inner = c; if (stopped) c.stop(); else if (pendVol != null && c.setVol) c.setVol(pendVol); c.finished.then(resolveEnd); });
+  let pendVol = null;
+  return {
+    finished,
+    stop(fadeSec) { stopped = true; if (inner) inner.stop(fadeSec); else setTimeout(resolveEnd, 50); },
+    setVol(nv, sec) { if (inner && inner.setVol) inner.setVol(nv, sec); else pendVol = nv; }
+  };
 }
 function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, opts = {}, origUrl = '') {
   const a = preloadUrl(url);
@@ -595,12 +605,12 @@ function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, op
   // 긴 소리는 브라우저의 소리 처리 장치를 거치지 않고 스피커로 바로 (거칠 게 적을수록 덜 끊겨요) · 관리자 화면의 소리 막대가 필요할 때만 연결
   if (wantAnalyser) routeToAnalyser(a, url);
   playing.add(a); if (url.startsWith('blob:')) inUse.add(url);
-  const base = Math.max(0, Math.min(1, volume / 100));
+  let base = Math.max(0, Math.min(1, volume / 100));
   if (clipDur > 0 && !maxSec) maxSec = clipDur + 0.3;
-  let fadeTimer = null, stopTimer = null, stepTimer = null;
+  let fadeTimer = null, stopTimer = null, stepTimer = null, fi = null, ending = false;
   let resolveEnd;
   const finished = new Promise(r => { resolveEnd = r; });
-  const end = () => { clearTimeout(fadeTimer); clearTimeout(stopTimer); clearInterval(stepTimer); playing.delete(a); inUse.delete(url); resolveEnd(); };
+  const end = () => { clearTimeout(fadeTimer); clearTimeout(stopTimer); clearInterval(stepTimer); clearInterval(fi); playing.delete(a); inUse.delete(url); resolveEnd(); };
   a.onended = end;
   a.onerror = () => {
     // CORS 설정이 사라진 경우: 분석기 연결 없이 다시 재생
@@ -622,13 +632,15 @@ function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, op
   if (opts.fadeIn) {
     let v = 0.001;
     const step = base / (opts.fadeIn * 10);
-    const fi = setInterval(() => { v += step; if (v >= base) { v = base; clearInterval(fi); } try { a.volume = v; } catch (e) { clearInterval(fi); } }, 100);
+    fi = setInterval(() => { v += step; if (v >= base) { v = base; clearInterval(fi); } try { a.volume = v; } catch (e) { clearInterval(fi); } }, 100);
   }
-  const fadeOut = () => {
+  const fadeOut = (sec = 2) => {
+    ending = true;
     let v = a.volume;
-    clearInterval(stepTimer);
+    clearInterval(stepTimer); clearInterval(fi);
+    const st = Math.max(0.005, v / Math.max(1, sec * 10));
     stepTimer = setInterval(() => {
-      v -= base / 20;
+      v -= st;
       if (v <= 0.01) { clearInterval(stepTimer); a.pause(); end(); } else a.volume = v;
     }, 100);
   };
@@ -636,7 +648,17 @@ function playElement(url, volume = 100, maxSec = 0, startAt = 0, clipDur = 0, op
     fadeTimer = setTimeout(fadeOut, Math.max(0, maxSec - 2) * 1000);
     stopTimer = setTimeout(() => { a.pause(); end(); }, (maxSec + 1) * 1000);
   }
-  return { finished, stop() { fadeOut(); } };
+  return {
+    finished,
+    stop(sec) { fadeOut(sec); },
+    setVol(nv, sec = 0.8) {
+      if (ending) return;
+      base = Math.max(0, Math.min(1, nv / 100));
+      clearInterval(fi); clearInterval(stepTimer);
+      let v = a.volume; const n = Math.max(1, Math.round(sec * 10)), st = (base - v) / n; let k = 0;
+      stepTimer = setInterval(() => { k++; v = k >= n ? base : v + st; try { a.volume = Math.max(0, Math.min(1, v)); } catch (e) { /* 무시 */ } if (k >= n) clearInterval(stepTimer); }, 100);
+    }
+  };
 }
 
 // ── 기기 음성 (설정 없이 무료) ─────────────────────────
@@ -770,6 +792,58 @@ export function playBell(bell, soundsById = {}) {
   return ctl;
 }
 export function stopAll() { if (current) current.stop(); }
+
+// ── 음악 시간 (v1.24) ─────────────────────────────────
+// 여러 곡을 정해 둔 시각(endAt)까지 이어서 틀어요. 끝나는 시각에는 5초 동안 서서히 작아지며 끝.
+// 종소리와는 따로 돌아서, 음악 중에 종이 울리면 음악만 잠깐 작게(duck) 했다가 다시 원래대로.
+// tracks: [{ url, name }] · onTrack(track, index) — 곡이 바뀔 때마다 알려 줌
+let music = null;
+export function playMusic({ tracks, endAt, volume = 60, shuffle = false, startIdx = 0, onTrack }) {
+  if (music) music.stop(1);
+  const list = (tracks || []).filter(t => t && t.url);
+  let stopped = false, inner = null, ducked = false, fails = 0;
+  const DUCK = 0.2;   // 종이 울리는 동안 음악은 원래 크기의 20%로
+  const volNow = () => ducked ? Math.max(3, volume * DUCK) : volume;
+  const makeRound = () => {
+    const a = list.map((_, i) => i);
+    if (shuffle) for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  };
+  let endTimer = null;
+  const run = (async () => {
+    if (!list.length) return;
+    let round = makeRound(), k = 0, last = -1;
+    if (!shuffle && startIdx > 0) k = startIdx % list.length;
+    while (!stopped && Date.now() < endAt - 4000) {
+      if (k >= round.length) {
+        round = makeRound(); k = 0;
+        if (shuffle && round.length > 1 && round[0] === last) [round[0], round[1]] = [round[1], round[0]];   // 같은 곡 연달아 안 나오게
+      }
+      const i = round[k++]; last = i;
+      try { onTrack && onTrack(list[i], i); } catch (e) { /* 무시 */ }
+      const t0 = Date.now();
+      inner = playUrl(list[i].url, volNow(), 0, 0, 0, { fadeIn: 1 });
+      await inner.finished;
+      inner = null;
+      if (stopped) break;
+      // 재생이 안 되는 곡(파일 오류)만 계속 나오면 멈춤 — 빈 반복 막기
+      if (Date.now() - t0 < 3000) { if (++fails >= list.length * 2) break; } else fails = 0;
+      await wait(1200);   // 곡과 곡 사이 숨 고르기
+    }
+  })();
+  // 끝나는 시각: 듣던 곡을 5초 동안 서서히 줄이며 끝
+  endTimer = setTimeout(() => { if (!stopped) { stopped = true; if (inner) inner.stop(5); } }, Math.max(0, endAt - Date.now() - 5000));
+  const ctl = {
+    finished: run,
+    stop(sec = 1.5) { stopped = true; clearTimeout(endTimer); if (inner) inner.stop(sec); },
+    duck(on) { if (ducked === !!on) return; ducked = !!on; if (inner && inner.setVol) inner.setVol(volNow(), on ? 0.6 : 1.5); },
+    setVolume(v) { volume = v; if (inner && inner.setVol) inner.setVol(volNow()); }
+  };
+  music = ctl;
+  ctl.finished.finally(() => { clearTimeout(endTimer); if (music === ctl) music = null; });
+  return ctl;
+}
+export function stopMusic() { if (music) music.stop(); }
 
 // 업로드 전에 파일 길이 알아내기
 export function fileDuration(file) {

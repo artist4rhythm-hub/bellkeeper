@@ -10,7 +10,7 @@ import { KR_HOLIDAYS } from './holidays.js';
 import { watchUpdates, checkUpdate, reloadToLatest, cmpVer } from './version.js';
 import {
   BUILTIN_SOUNDS, SOUND_CATS, BGM_MOODS, isBuiltin, builtinName, resolveBuiltin, playBell, stopAll, unlockAudio, fileDuration,
-  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, builtinInfo, probeCors
+  deviceVoices, getDeviceVoicePref, setDeviceVoicePref, speak, builtinInfo, probeCors, builtinUrl, playMusic, stopMusic
 } from './sounds.js';
 import { createRTA } from './rta.js';
 import { clockSvg, inkArt, DIGI_STYLES, digitalSvg, digiPickerHtml, HG_STYLES } from './faces.js';
@@ -134,6 +134,53 @@ function bgmOptions(selected) {
   const ups = S.sounds.filter(s => s.kind !== 'tts');
   const u = ups.map(s => `<option value="${h(s.id)}" ${s.id === sel ? 'selected' : ''}>${h(withLen(s.name, s.duration))}</option>`).join('');
   return `<option value="" ${!sel ? 'selected' : ''}>배경음악 없음</option>${g}${u ? `<optgroup label="올린 소리·음악">${u}</optgroup>` : ''}`;
+}
+// ── 음악 시간 (v1.24) ─────────────────────────────
+const MDURS = [5, 10, 15, 20, 30];
+const MVOLS = [[40, '작게'], [60, '보통'], [80, '크게']];
+function trackSec(id) { if (isBuiltin(id)) { const x = builtinInfo(id); return x ? x.sec || 0 : 0; } const x = S.sounds.find(s => s.id === id); return x ? x.duration || 0 : 0; }
+function musicAddOptions() {
+  const g = BGM_MOODS.map(m => `<optgroup label="기본 배경음악 · ${h(m.label)}">${BUILTIN_SOUNDS.filter(s => s.cat === 'bgm' && s.mood === m.id)
+    .map(s => `<option value="${s.id}">${h(withLen(s.name, s.sec))}</option>`).join('')}</optgroup>`).join('');
+  const ups = S.sounds.filter(s => s.kind !== 'tts');
+  const u = ups.map(s => `<option value="${h(s.id)}">${h(withLen(s.name, s.duration))}</option>`).join('');
+  return `<option value="">+ 곡 넣기 (골라 주세요)</option>${u ? `<optgroup label="올린 소리·음악">${u}</optgroup>` : ''}${g}`;
+}
+// 음악 시간 미리 듣기: 첫 곡을 20초 동안 (다시 누르면 멈춤)
+let musicPv = null;
+async function previewMusic(b) {
+  stopAll();
+  if (musicPv) { musicPv.stop(); musicPv = null; return toast('미리 듣기를 멈췄어요'); }
+  const map = soundsById();
+  const tracks = (b.playlist || []).map(id => isBuiltin(id) ? { url: builtinUrl(id), name: builtinName(id) } : (map[id] && map[id].url ? { url: map[id].url, name: map[id].name } : null)).filter(Boolean);
+  if (!tracks.length) return toast('곡을 먼저 넣어 주세요');
+  await unlockAudio();
+  const c = playMusic({ tracks, endAt: Date.now() + 20000, volume: b.volume == null ? 60 : b.volume, shuffle: b.order === 'shuffle' });
+  musicPv = c; c.finished.then(() => { if (musicPv === c) musicPv = null; });
+  toast(`음악 시간 미리 듣기 20초 · 다시 누르면 멈춰요`);
+}
+function musicSummary(b) {
+  const n = (b.playlist || []).length;
+  return `음악 시간 · ${n ? n + '곡' : '곡 없음'} · ${b.durMin || 10}분 · ${b.order === 'shuffle' ? '섞어서' : '차례로'}${(b.volume != null && b.volume !== 60) ? ` · 음량 ${b.volume}%` : ''}`;
+}
+function musicFieldsHtml(b, i) {
+  const pl = b.playlist || [];
+  const tot = pl.reduce((a, id) => a + trackSec(id), 0);
+  const dur = b.durMin || 10, vol = b.volume == null ? 60 : b.volume;
+  return `<div class="mu-ed">
+    <div class="mu-f"><b>틀 곡 <span class="tiny muted">${b.order === 'shuffle' ? '섞어서 돌려 틀어요' : '위에서부터 차례로, 끝나면 처음부터 다시'}${tot ? ` · 한 바퀴 ${fmtDur(tot)}` : ''}</span></b>
+      <div class="mu-list">${pl.map((id, k) => `<div class="mu-it"><span class="mu-n">${k + 1}</span><span class="mu-name">${h(soundName(id))}</span><span class="mu-len">${h(fmtSec(trackSec(id)))}</span>
+        <button class="icon-btn sm soft" data-act="mu-move" data-i="${i}" data-k="${k}" data-d="-1" ${k === 0 ? 'disabled' : ''} aria-label="위로">▲</button>
+        <button class="icon-btn sm soft" data-act="mu-move" data-i="${i}" data-k="${k}" data-d="1" ${k === pl.length - 1 ? 'disabled' : ''} aria-label="아래로">▼</button>
+        <button class="icon-btn sm soft" data-act="mu-del" data-i="${i}" data-k="${k}" aria-label="빼기">✕</button></div>`).join('') || '<div class="tiny muted">아직 곡이 없어요. 아래에서 곡을 골라 넣어 주세요.</div>'}
+      ${pl.length < 20 ? `<select class="input mu-add" data-mu-add="${i}" aria-label="곡 넣기">${musicAddOptions()}</select>` : '<div class="tiny muted">곡은 20개까지 넣을 수 있어요</div>'}</div></div>
+    <div class="mu-f"><b>얼마 동안</b><div class="chips wrap">${MDURS.map(m => `<button class="chip ${dur === m ? 'on' : ''}" data-act="mu-dur" data-i="${i}" data-v="${m}">${m}분</button>`).join('')}
+      <label class="mu-custom">직접 <input class="input num" type="number" min="1" max="60" data-b="${i}.durMin" value="${dur}"> 분 <span class="tiny muted">(최대 60분)</span></label></div></div>
+    <div class="mu-f"><b>순서</b><div class="chips">${[['seq', '차례로'], ['shuffle', '섞어서']].map(([v, t]) => `<button class="chip ${(b.order || 'seq') === v ? 'on' : ''}" data-act="mu-ord" data-i="${i}" data-v="${v}">${t}</button>`).join('')}</div></div>
+    <div class="mu-f"><b>음량 <span class="tiny muted" data-mu-vol="${i}">${vol}%</span></b><div class="chips wrap">${MVOLS.map(([v, t]) => `<button class="chip ${vol === v ? 'on' : ''}" data-act="mu-vol" data-i="${i}" data-v="${v}">${t} ${v}%</button>`).join('')}
+      <input type="range" min="10" max="100" step="5" data-b="${i}.volume" value="${vol}" aria-label="음량" style="flex:1 1 140px"></div></div>
+    <div class="tiny muted">${h(b.time || '')}부터 ${dur}분 동안 틀고, 끝날 때 5초 동안 서서히 작아지며 끝나요. 음악 중에 다른 종이 울리면 음악을 작게 줄였다가 종이 끝나면 다시 키워요. 곡은 재생기에 미리 저장돼서 인터넷이 끊겨도 나와요.</div>
+  </div>`;
 }
 const ttsCfg = () => Object.assign({ mode: 'device', voice: DEFAULT_VOICE, rate: 1 }, (S.space && S.space.tts) || {});
 const googleOn = () => ttsCfg().mode === 'google' && ttsAvailable();
@@ -522,7 +569,7 @@ function viewToday() {
       ${day.bells.length ? day.bells.map((b, i) => {
         const cls = i === nextIdx ? 'next' : (b.at <= now ? 'past' : '');
         return `<div class="bell-row ${cls}"><span class="cdot" style="background:${bellColor(b).c}" title="${h(bellColor(b).name)}"></span><div class="t num">${h(b.time)}</div>
-          <div class="grow"><div style="font-weight:500">${h(b.label || '종')}</div><div class="small muted">${h(soundName(b.soundId))}${b.say ? ` · "${h(b.say)}"` : ''}${b.bgmId ? ` · 배경음악 ${h(soundName(b.bgmId))}` : ''}</div></div>
+          <div class="grow"><div style="font-weight:500">${h(b.label || '종')}</div><div class="small muted">${h(b.kind === 'music' ? '♫ ' + musicSummary(b) : soundName(b.soundId))}${b.say ? ` · "${h(b.say)}"` : ''}${b.bgmId ? ` · 배경음악 ${h(soundName(b.bgmId))}` : ''}</div></div>
           <button class="icon-btn sm soft" data-act="preview" data-tt="${h(day.tt.id)}" data-i="${b.idx}" aria-label="${h(b.label)} 미리 듣기">${I.play}</button></div>`;
       }).join('') : `<div class="muted center" style="padding:24px">오늘은 종이 없어요</div>`}
     </section>
@@ -1058,7 +1105,7 @@ function sheetMonDay(sh) {
       const st = bellState(d, sh.key, b, now);
       const at = log[`${b.time}#${b.idx}`];
       return `<div class="bell-row st-row-${st}"><span class="t num">${h(b.time.slice(0, 5))}</span><span class="cdot" style="background:${bellColor(b).c}"></span>
-        <span class="grow">${h(b.label || '종')}<span class="tiny muted"> · ${h(soundName(b.soundId))}</span></span>
+        <span class="grow">${h(b.label || '종')}<span class="tiny muted"> · ${h(b.kind === 'music' ? '♫ ' + musicSummary(b) : soundName(b.soundId))}</span></span>
         <span class="tiny st-lab sl-${st}">${label[st]}${at ? ` ${fmtT(at)}` : ''}</span></div>`;
     }).join('') || '<div class="card muted center">이날은 종이 없어요</div>'}</div>
     ${!d.logSince ? '<div class="tiny muted">이 재생기는 아직 v1.10 이전 버전이라 울린 기록이 없어요. [새로 고침·업데이트]를 보내 주세요.</div>' : ''}
@@ -1433,12 +1480,12 @@ function closeSheet() {
     if (!ttTimesOk(sh.draft)) {
       if (!confirm('시각이 잘못된 종(빨간 칸)이 있어 마지막 고친 내용을 저장하지 못했어요.\n그래도 닫을까요?')) { renderSheet(); return; }
     } else {
-      S.sheet = null; renderSheet(); stopAll();
+      S.sheet = null; renderSheet(); stopAll(); stopMusic();
       ttSave(sh, { final: true }).then(ok => { if (ok) toast('저장했어요'); });
       return;
     }
   }
-  S.sheet = null; renderSheet(); stopAll();
+  S.sheet = null; renderSheet(); stopAll(); stopMusic();
 }
 
 // ── 일과표 자동 저장 ─────────────────────────────
@@ -1765,12 +1812,13 @@ function normTime(v) {
   return `${pad(H)}:${pad(M)}`;
 }
 function addMin(t, mins) { let x = timeToSec(t) / 60 + mins; x = ((x % 1440) + 1440) % 1440; return `${pad(Math.floor(x / 60))}:${pad(Math.floor(x % 60))}`; }
-const bellCopy = b => { const o = { time: b.time, label: b.label || '', soundId: b.soundId || 'b:westminster', volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; if (b.color) o.color = b.color; if (b.bgmId) { o.bgmId = b.bgmId; o.bgmVol = b.bgmVol == null ? 30 : b.bgmVol; } return o; };
+const bellCopy = b => { const o = { time: b.time, label: b.label || '', soundId: b.soundId || 'b:westminster', volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; if (b.color) o.color = b.color; if (b.bgmId) { o.bgmId = b.bgmId; o.bgmVol = b.bgmVol == null ? 30 : b.bgmVol; } if (b.kind === 'music') Object.assign(o, { kind: 'music', playlist: [...(b.playlist || [])], durMin: b.durMin || 10, order: b.order || 'seq', soundId: 'none' }); return o; };
 const knownSound = id => !id || id === 'none' || isBuiltin(id) || S.sounds.some(s => s.id === id);
 function fitToSpace(b) {
   const o = { ...bellCopy(b), _open: false };
   if (!knownSound(o.soundId)) o.soundId = 'b:westminster';
   if (o.bgmId && !knownSound(o.bgmId)) { delete o.bgmId; delete o.bgmVol; }
+  if (o.playlist) o.playlist = o.playlist.filter(id => id !== 'none' && knownSound(id));
   return o;
 }
 const selList = sh => [...(sh.sel || new Set())].filter(i => i < sh.draft.bells.length).sort((a, b) => a - b);
@@ -1917,27 +1965,30 @@ function sheetTtEdit(sh) {
   const rows = bells.map((b, i) => {
     const sel = sh.sel.has(i);
     const bad = b.time && !/^\d{2}:\d{2}$/.test(b.time);
-    const sum = [b.repeat > 1 ? `종 ${b.repeat}번` : '', b.say ? `"${b.say}"${b.sayRepeat > 1 ? ` ${b.sayRepeat}번` : ''}` : '', b.bgmId ? `배경음악 ${soundName(b.bgmId)}` : '', (b.volume != null && b.volume !== 100) ? `음량 ${b.volume}%` : ''].filter(Boolean).join(' · ');
+    const sum = b.kind === 'music' ? '' : [b.repeat > 1 ? `종 ${b.repeat}번` : '', b.say ? `"${b.say}"${b.sayRepeat > 1 ? ` ${b.sayRepeat}번` : ''}` : '', b.bgmId ? `배경음악 ${soundName(b.bgmId)}` : '', (b.volume != null && b.volume !== 100) ? `음량 ${b.volume}%` : ''].filter(Boolean).join(' · ');
     const col = bellColor(b);
-    return `<div class="be-row ${sel ? 'sel' : ''} ${bad ? 'bad' : ''}" data-row="${i}" style="--bc:${col.c};--bcbg:${col.bg}" title="${h(col.name)}${b.color ? '' : ' (자동)'}">
+    const mu = b.kind === 'music';
+    return `<div class="be-row ${mu ? 'music' : ''} ${sel ? 'sel' : ''} ${bad ? 'bad' : ''}" data-row="${i}" style="--bc:${col.c};--bcbg:${col.bg}" title="${h(col.name)}${b.color ? '' : ' (자동)'}">
       <div class="be-lead"><span class="be-grip" draggable="true" data-grip="${i}" title="끌어서 순서 바꾸기 (시각은 제자리)" aria-hidden="true">${I.grip}</span>
       <input type="checkbox" class="be-cb" data-sel="${i}" ${sel ? 'checked' : ''} aria-label="${h(b.time)} ${h(b.label)} 선택"></div>
       <input class="input be-time num" data-b="${i}.time" value="${h(b.time)}" inputmode="numeric" maxlength="5" placeholder="09:00" aria-label="시각 (예: 0940)">
       <input class="input be-label" data-b="${i}.label" maxlength="40" placeholder="이름 (예: 1교시 시작)" value="${h(b.label)}" aria-label="종 이름">
-      <select class="input be-sound" data-b="${i}.soundId" aria-label="소리">${soundOptions(b.soundId)}</select>
+      ${mu ? `<button class="be-msum" data-act="tt-more" data-i="${i}" title="곡·시간 바꾸기"><span class="mu-ic">♫</span>${h(musicSummary(b))}</button>` : `<select class="input be-sound" data-b="${i}.soundId" aria-label="소리">${soundOptions(b.soundId)}</select>
       <input class="input be-say" data-b="${i}.say" maxlength="120" placeholder="안내 문구 (선택)" value="${h(b.say || '')}" aria-label="안내 문구">
       <select class="input be-bgm" data-b="${i}.bgmId" aria-label="안내 배경음악">${bgmOptions(b.bgmId)}</select>
       <select class="input be-rep" data-b="${i}.repeat" aria-label="종소리 반복" title="종소리 반복">${repOptions(b.repeat, 5, '종 ')}</select>
-      <select class="input be-srep" data-b="${i}.sayRepeat" aria-label="안내 문구 반복" title="안내 문구(배경음악) 반복">${repOptions(b.sayRepeat, 3, '안내 ')}</select>
+      <select class="input be-srep" data-b="${i}.sayRepeat" aria-label="안내 문구 반복" title="안내 문구(배경음악) 반복">${repOptions(b.sayRepeat, 3, '안내 ')}</select>`}
       <div class="be-acts">
-        <button class="icon-btn sm soft" data-act="tt-preview" data-i="${i}" aria-label="종소리와 안내 모두 미리 듣기" title="종소리 + 안내 미리 듣기">${I.play}</button>
+        <button class="icon-btn sm soft" data-act="tt-preview" data-i="${i}" aria-label="${mu ? '음악 미리 듣기' : '종소리와 안내 모두 미리 듣기'}" title="${mu ? '첫 곡 20초 미리 듣기' : '종소리 + 안내 미리 듣기'}">${I.play}</button>
         <button class="icon-btn sm ${b._open ? '' : 'soft'}" data-act="tt-more" data-i="${i}" aria-expanded="${b._open ? 'true' : 'false'}" aria-label="더보기">${I.dots}</button>
       </div>
       ${sum ? `<div class="be-sum">${h(sum)}</div>` : ''}
       ${b._open ? `<div class="be-more">
+        <div class="row wrap"><span class="small bold">종류</span><div class="seg">${[['bell', '종'], ['music', '음악 시간']].map(([v, t]) => `<button class="${(mu ? 'music' : 'bell') === v ? 'on' : ''}" data-act="ed-kind" data-i="${i}" data-v="${v}">${t}</button>`).join('')}</div>
+          <span class="tiny muted">${mu ? '정해 둔 시간 동안 여러 곡을 이어서 틀어요 (등교·하교 음악)' : '음악 시간: 등교·하교 때 여러 곡을 10분·20분 동안 이어서 틀기'}</span></div>
         <div class="acts">
-          <button class="btn sm" data-act="ed-same-prev" data-i="${i}" title="앞에 있는 같은 색 종의 소리·반복·안내 설정을 그대로 가져와요">↑ 앞의 같은 색 종처럼</button>
-          <button class="btn sm gold" data-act="tt-say-preview" data-i="${i}" ${b.say ? '' : 'disabled'}>${I.play} 안내만 미리 듣기</button>
+          ${mu ? '' : `<button class="btn sm" data-act="ed-same-prev" data-i="${i}" title="앞에 있는 같은 색 종의 소리·반복·안내 설정을 그대로 가져와요">↑ 앞의 같은 색 종처럼</button>
+          <button class="btn sm gold" data-act="tt-say-preview" data-i="${i}" ${b.say ? '' : 'disabled'}>${I.play} 안내만 미리 듣기</button>`}
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="위로 옮기기">▲ 위로</button>
           <button class="btn sm" data-act="ed-move-one" data-i="${i}" data-d="1" ${i === bells.length - 1 ? 'disabled' : ''} aria-label="아래로 옮기기">▼ 아래로</button>
           <button class="btn sm" data-act="ed-ins" data-i="${i}" data-pos="above">위에 종 넣기</button>
@@ -1950,7 +2001,7 @@ function sheetTtEdit(sh) {
         <div class="colorpick"><span class="small bold">색</span>
           <button class="chip ${!b.color ? 'on' : ''}" data-act="ed-color" data-i="${i}" data-v="">자동 (${h(BELL_COLORS.find(x => x.id === autoColorId(b.label)).name)})</button>
           ${BELL_COLORS.map(c => `<button class="chip ${b.color === c.id ? 'on' : ''}" data-act="ed-color" data-i="${i}" data-v="${c.id}"><span class="cdot" style="background:${c.c}"></span>${h(c.name)}</button>`).join('')}</div>
-        <div class="fields">
+        ${mu ? musicFieldsHtml(b, i) : `<div class="fields">
           <label class="field full phone-only"><span>안내 문구 (소리 뒤에 읽어줌)</span><input class="input" maxlength="120" data-b="${i}.say" placeholder="예: 점심시간입니다." value="${h(b.say || '')}"></label>
           <label class="field full phone-only bgm-field"><span>안내할 때 깔 배경음악</span><select class="input" data-b="${i}.bgmId">${bgmOptions(b.bgmId)}</select></label>
           <label class="field phone-only"><span>종소리 반복</span><select class="input" data-b="${i}.repeat">${repOptions(b.repeat, 5)}</select></label>
@@ -1958,7 +2009,7 @@ function sheetTtEdit(sh) {
           <label class="field"><span>음량 ${b.volume == null ? 100 : b.volume}%</span><input type="range" min="10" max="100" step="5" data-b="${i}.volume" value="${b.volume == null ? 100 : b.volume}"></label>
           <label class="field"><span>최대 재생 (초, 0=끝까지)</span><input class="input num" type="number" min="0" max="3600" data-b="${i}.maxSec" value="${b.maxSec || 0}"></label>
           <label class="field"><span>배경음악 크기 ${b.bgmVol == null ? 30 : b.bgmVol}%</span><input type="range" min="10" max="70" step="5" data-b="${i}.bgmVol" value="${b.bgmVol == null ? 30 : b.bgmVol}"></label>
-        </div>
+        </div>`}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -1982,6 +2033,7 @@ function sheetTtEdit(sh) {
     </div>
     <div class="row wrap">
       <button class="btn dashed" style="flex:1 1 160px;width:auto" data-act="tt-add-bell">+ 종 추가</button>
+      <button class="btn dashed" style="flex:0 1 200px;width:auto" data-act="tt-add-music">♫ 음악 시간 추가</button>
       <button class="btn gold" data-act="ed-panel" data-id="repeat">반복으로 만들기</button>
     </div>
     <div class="tiny muted">시각은 0940처럼 숫자만 넣어도 돼요. 여러 개를 고르면 복사·붙여넣기·한 번에 바꾸기를 쓸 수 있어요. 왼쪽 ⠿ 를 끌거나 ▲▼로 순서를 바꾸면 시각은 제자리에 있고 내용만 옮겨져요. 컴퓨터에서는 Ctrl+C / Ctrl+V / Ctrl+D(복제), Alt+↑↓(옮기기)도 돼요.</div>
@@ -2015,8 +2067,10 @@ function edDup(sh, idxs) {
   sh.sel = new Set(add.map((_, k) => at + k));
   renderSheet();
 }
-function edSetFrom(b) { return { soundId: b.soundId, volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', bgmId: b.bgmId || '', bgmVol: b.bgmVol == null ? 30 : b.bgmVol, repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; }
+function edSetFrom(b) { if (b.kind === 'music') return { kind: 'music', playlist: [...(b.playlist || [])], durMin: b.durMin || 10, order: b.order || 'seq', volume: b.volume == null ? 60 : b.volume }; return { soundId: b.soundId, volume: b.volume == null ? 100 : b.volume, maxSec: b.maxSec || 0, say: b.say || '', bgmId: b.bgmId || '', bgmVol: b.bgmVol == null ? 30 : b.bgmVol, repeat: b.repeat || 1, sayRepeat: b.sayRepeat || 1 }; }
 function edApplySet(b, s) {
+  if (s.kind === 'music') { Object.assign(b, { kind: 'music', playlist: [...s.playlist], durMin: s.durMin, order: s.order, volume: s.volume, soundId: 'none', say: '' }); delete b.bgmId; delete b.sayId; return; }
+  delete b.kind; delete b.playlist; delete b.durMin; delete b.order;
   Object.assign(b, { soundId: s.soundId, volume: s.volume, maxSec: s.maxSec, say: s.say, repeat: s.repeat || 1, sayRepeat: s.sayRepeat || 1 });
   if (s.bgmId) { b.bgmId = s.bgmId; b.bgmVol = s.bgmVol; } else { delete b.bgmId; delete b.bgmVol; }
   if (!knownSound(b.soundId)) b.soundId = 'b:westminster';
@@ -2226,7 +2280,7 @@ async function importShare(s) {
         const r = await F.addDoc(sub('sounds'), { name: String(info.name || '공유받은 소리').slice(0, 40), url: info.url, linked: true, createdAt: F.serverTimestamp(), by: S.user.uid });
         map[oldId] = r.id;
       }
-      const bells = cleanBells((s.data.bells || []).map(b => ({ ...b, soundId: map[b.soundId] || (isBuiltin(b.soundId) ? b.soundId : 'b:westminster') })));
+      const bells = cleanBells((s.data.bells || []).map(b => ({ ...b, soundId: map[b.soundId] || (isBuiltin(b.soundId) || b.soundId === 'none' ? b.soundId : 'b:westminster'), playlist: (b.playlist || []).map(id => map[id] || id).filter(id => isBuiltin(id) || S.sounds.some(x => x.id === id) || Object.values(map).includes(id)) })));
       await F.addDoc(sub('timetables'), { name: String(s.name).slice(0, 40), bells, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp(), fromShare: s.id });
       S.tab = 'timetables';
     } else {
@@ -2527,6 +2581,7 @@ document.addEventListener('click', async e => {
       case 'preview': {
         const t = ttById(el.dataset.tt);
         const b = t && cleanBells(t.bells)[Number(el.dataset.i)];
+        if (b && b.kind === 'music') { previewMusic(b); return; }
         if (b) playBell(b, soundsById());
         return;
       }
@@ -2599,7 +2654,8 @@ document.addEventListener('click', async e => {
       case 'tt-preview': case 'tt-say-preview': {
         const b = sh.draft.bells[Number(el.dataset.i)];
         if (act === 'tt-say-preview' && !b.say) return toast('안내 문구를 먼저 넣어 주세요');
-        stopAll();
+        if (b.kind === 'music') return previewMusic(b);
+        stopAll(); stopMusic();
         const p = await bellForPreview(b);
         if (act === 'tt-say-preview') p.bell.soundId = 'none';
         return playBell(p.bell, p.map);
@@ -2620,6 +2676,40 @@ document.addEventListener('click', async e => {
         sh.sel = new Set(); b._open = true;
         return renderSheet();
       }
+      case 'tt-add-music': {
+        const bs = sh.draft.bells; const sel = selList(sh);
+        const ref = sel.length ? bs[sel[sel.length - 1]] : bs[bs.length - 1];
+        const at = sel.length ? sel[sel.length - 1] + 1 : bs.length;
+        const t = ref && /^\d{2}:\d{2}$/.test(ref.time) ? addMin(ref.time, 10) : '08:20';
+        bs.splice(at, 0, { time: t, label: '음악 시간', kind: 'music', playlist: [], durMin: 10, order: 'seq', soundId: 'none', volume: 60, maxSec: 0, say: '', _open: true });
+        sh.sel = new Set();
+        renderSheet();
+        const rows = sheetRoot.querySelectorAll('.be-row'); if (rows[at]) rows[at].scrollIntoView({ block: 'center' });
+        return toast('음악 시간을 넣었어요 · 시각을 맞추고 곡을 골라 주세요');
+      }
+      case 'ed-kind': {
+        const b = sh.draft.bells[Number(el.dataset.i)];
+        if (el.dataset.v === 'music') {
+          Object.assign(b, { kind: 'music', playlist: b.playlist || [], durMin: b.durMin || 10, order: b.order || 'seq', volume: b.kind === 'music' ? b.volume : 60 });
+          if (b.bgmId && !b.playlist.length) b.playlist.push(b.bgmId);
+          else if (b.soundId && b.soundId !== 'none' && !b.playlist.length && (isBuiltin(b.soundId) ? (builtinInfo(b.soundId) || {}).cat === 'bgm' : true)) b.playlist.push(b.soundId);
+          b._soundWas = b.soundId; b.soundId = 'none';
+        } else {
+          delete b.kind; b.soundId = b._soundWas && b._soundWas !== 'none' ? b._soundWas : 'b:westminster'; delete b._soundWas;
+          if (b.volume === 60) b.volume = 100;
+        }
+        return renderSheet();
+      }
+      case 'mu-move': {
+        const b = sh.draft.bells[Number(el.dataset.i)], k = Number(el.dataset.k), j = k + Number(el.dataset.d);
+        if (!b.playlist || j < 0 || j >= b.playlist.length) return;
+        [b.playlist[k], b.playlist[j]] = [b.playlist[j], b.playlist[k]];
+        return renderSheet();
+      }
+      case 'mu-del': { const b = sh.draft.bells[Number(el.dataset.i)]; b.playlist.splice(Number(el.dataset.k), 1); return renderSheet(); }
+      case 'mu-dur': { sh.draft.bells[Number(el.dataset.i)].durMin = Number(el.dataset.v); return renderSheet(); }
+      case 'mu-ord': { sh.draft.bells[Number(el.dataset.i)].order = el.dataset.v === 'shuffle' ? 'shuffle' : 'seq'; return renderSheet(); }
+      case 'mu-vol': { sh.draft.bells[Number(el.dataset.i)].volume = Number(el.dataset.v); return renderSheet(); }
       case 'ed-color': {
         const b = sh.draft.bells[Number(el.dataset.i)];
         if (el.dataset.v) b.color = el.dataset.v; else delete b.color;
@@ -2865,7 +2955,9 @@ document.addEventListener('input', e => {
     const [i, f] = key.split('.');
     const b = sh.draft.bells[Number(i)];
     if (!b) return;
-    b[f] = (f === 'volume' || f === 'maxSec' || f === 'bgmVol' || f === 'repeat' || f === 'sayRepeat') ? Number(t.value) : t.value;
+    b[f] = (f === 'volume' || f === 'maxSec' || f === 'bgmVol' || f === 'repeat' || f === 'sayRepeat' || f === 'durMin') ? Number(t.value) : t.value;
+    if (f === 'durMin') b.durMin = Math.max(1, Math.min(60, Math.round(b.durMin) || 10));
+    if (f === 'volume' && b.kind === 'music') { const l = sheetRoot.querySelector(`[data-mu-vol="${i}"]`); if (l) l.textContent = `${t.value}%`; }
     if (f === 'volume') { const L = t.closest('label'); const lab = L && L.querySelector('span'); if (lab) lab.textContent = `음량 ${t.value}%`; }
     if (f === 'bgmVol') { const L = t.closest('label'); const lab = L && L.querySelector('span'); if (lab) lab.textContent = `배경음악 크기 ${t.value}%`; }
     // 같은 값을 보여주는 다른 칸(휴대폰용 더보기 칸 등)도 맞춰 줌
@@ -2905,6 +2997,12 @@ document.addEventListener('change', e => {
   // select 상자는 input 이벤트가 없는 브라우저도 있어 한 번 더
   if (t.tagName === 'SELECT') t.dispatchEvent(new Event('input', { bubbles: true }));
   if (!sh || sh.type !== 'tt-edit') return;
+  if (t.dataset.muAdd != null) {
+    const b = sh.draft.bells[Number(t.dataset.muAdd)];
+    if (b && t.value) { b.playlist = b.playlist || []; if (b.playlist.length < 20) b.playlist.push(t.value); renderSheet(); }
+    return;
+  }
+  if (t.dataset.b && /\.durMin$/.test(t.dataset.b)) return renderSheet();
   if (t.classList.contains('be-time')) {
     const i = Number(t.dataset.b.split('.')[0]), b = sh.draft.bells[i];
     const n = normTime(t.value);
